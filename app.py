@@ -261,7 +261,7 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (Form 기반 전송 에러 수정 완료)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (정수형 인자 교체 버전)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -276,9 +276,9 @@ with tab2:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
-    # 3. 탭 내부 충돌 방지: st.form 입력 방식 (컬럼 비율 5:1 강제 설정)
+    # 3. 탭 내부 충돌 방지: st.form 입력 방식 (2분할 지정)
     with st.form(key="chat_form", clear_on_submit=True):
-        col_input, col_btn = st.columns()
+        col_input, col_btn = st.columns(2)
         with col_input:
             user_question = st.text_input(
                 "질문 입력",
@@ -305,7 +305,7 @@ with tab2:
                         genai.configure(api_key=CLEAN_API_KEY, transport='rest')
                         model = genai.GenerativeModel("gemini-1.5-flash")
                         
-                        # 컨텍스트 최적화: 질문 관련 상위 행 선별
+                        # 컨텍스트 최적화: 질문 관련 상위 행만 선별
                         ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
                         
                         if len(df_inventory) > 30:
@@ -314,37 +314,5 @@ with tab2:
                                 row_scores = []
                                 for idx, row in df_inventory.iterrows():
                                     row_text = " ".join(row.astype(str).values).lower()
-                                    score = sum(1 for kw in keywords if kw in row_text)
-                                    row_scores.append((score, idx))
-                                row_scores.sort(key=lambda x: x[0], reverse=True)
-                                best_indices = [idx for score, idx in row_scores[:30]]
-                                sample_df = df_inventory.loc[best_indices]
-                            else:
-                                sample_df = df_inventory.head(30)
-                        else:
-                            sample_df = df_inventory
-                            
-                        context_csv = sample_df[ai_context_cols].to_csv(index=False)
-                        
-                        prompt = f"""
-                        너는 팀의 재고 및 오더 검증 전문가야.
-                        아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
-                        사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
-                        질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
-                        금액 단위는 세 자리 콤마와 원화(원)로 표기해.
-                        [업데이트 일시]: {update_datetime}
-                        [창고 연동 실재고 데이터]
-                        {context_csv}
-                        [영업 담당자 질문]
-                        {user_question}
-                        """
-                        response = model.generate_content(prompt)
-                        answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
-                        
-                        st.markdown(answer_text)
-                        st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
-                        
-                    except Exception as e:
-                        err_msg = f"❌ AI 호출 중 에러 발생: {e}"
-                        st.error(err_msg)
-                        st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                
+

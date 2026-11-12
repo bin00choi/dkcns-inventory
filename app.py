@@ -139,8 +139,8 @@ if check_password():
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
             
-            # 락을 원천 차단하는 가벼운 개별 입력 구조 (st.form 제거)
-            col_input, col_btn = st.columns()
+            # 튜플 (5, 1)을 사용하여 인자 누락 에러 원천 차단
+            col_input, col_btn = st.columns((5, 1))
             with col_input:
                 user_question = st.text_input(
                     "질문 입력",

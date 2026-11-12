@@ -261,46 +261,67 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (대화 내역 세션 유지 완벽 적용)
 # -------------------------------------------------------------------------
 with tab2:
-    # 요청하신 직관적이고 군더더기 없는 설명과 예시로 업데이트 완료
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
     st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
-    
+
+    # 1. 이전 대화 내역 세션 초기화
+    if "chat_messages" not in st.session_state:
+        st.session_state["chat_messages"] = []
+
+    # 2. 화면이 새로고침되어도 이전 대화 내용이 사라지지 않고 그대로 렌더링
+    for msg in st.session_state["chat_messages"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # 3. 사용자 질문 입력창
     user_question = st.chat_input("질문 예시: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'")
-    
+
     if user_question:
+        # 사용자 질문을 화면에 띄우고 세션에 저장
+        st.session_state["chat_messages"].append({"role": "user", "content": user_question})
         with st.chat_message("user"):
-            st.write(user_question)
-            
+            st.markdown(user_question)
+
         with st.chat_message("assistant"):
             if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
-                st.warning("⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요.")
+                warn_msg = "⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요."
+                st.warning(warn_msg)
+                st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
             else:
-                try:
-                    genai.configure(api_key=CLEAN_API_KEY)
-                    
-                    # 가장 안정적이고 호환성이 확실한 gemini-pro 모델명 사용
-                    model = genai.GenerativeModel("gemini-3.8-flash")
-                    
-                    # 챗봇에 전달할 컨텍스트 컬럼 정의
-                    ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
-                    context_csv = df_inventory[ai_context_cols].to_csv(index=False)
-                    
-                    prompt = f"""
-                    너는 팀의 재고 및 오더 검증 전문가야.
-                    아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
-                    사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
-                    질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
-                    금액 단위는 세 자리 콤마와 원화(원)로 표기해.
-                    [업데이트 일시]: {update_datetime}
-                    [창고 연동 실재고 데이터]
-                    {context_csv}
-                    [영업 담당자 질문]
-                    {user_question}
-                    """
-                    response = model.generate_content(prompt)
-                    st.markdown(response.text)
-                except Exception as e:
-                    st.error(f"AI 호출 중 에러 발생: {e}")
+                with st.spinner("🔍 실재고 데이터를 분석하여 답변을 작성하고 있습니다..."):
+                    try:
+                        genai.configure(api_key=CLEAN_API_KEY)
+                        model = genai.GenerativeModel("gemini-3.8-flash")
+
+                        # 챗봇에 전달할 컨텍스트 데이터 생성
+                        ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
+                        context_csv = df_inventory[ai_context_cols].to_csv(index=False)
+
+                        prompt = f"""
+                        너는 팀의 재고 및 오더 검증 전문가야.
+                        아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
+                        사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
+                        질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
+                        금액 단위는 세 자리 콤마와 원화(원)로 표기해.
+                        [업데이트 일시]: {update_datetime}
+                        [창고 연동 실재고 데이터]
+                        {context_csv}
+                        [영업 담당자 질문]
+                        {user_question}
+                        """
+                        response = model.generate_content(prompt)
+
+                        # 안전한 텍스트 추출
+                        answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
+
+                        # 화면에 출력 후 세션에 영구 보존
+                        st.markdown(answer_text)
+                        st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
+
+                    except Exception as e:
+                        err_msg = f"❌ AI 호출 중 에러 발생: {e}"
+                        st.error(err_msg)
+                        st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})

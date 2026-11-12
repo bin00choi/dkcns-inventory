@@ -261,12 +261,12 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (대화 내역 세션 유지 완벽 적용)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (504 에러 및 무한 대기 해결 버전)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
     st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
-
+    
     # 1. 이전 대화 내역 세션 초기화
     if "chat_messages" not in st.session_state:
         st.session_state["chat_messages"] = []
@@ -275,16 +275,16 @@ with tab2:
     for msg in st.session_state["chat_messages"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-
+            
     # 3. 사용자 질문 입력창
     user_question = st.chat_input("질문 예시: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'")
-
+    
     if user_question:
         # 사용자 질문을 화면에 띄우고 세션에 저장
         st.session_state["chat_messages"].append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
-
+            
         with st.chat_message("assistant"):
             if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
                 warn_msg = "⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요."
@@ -293,13 +293,16 @@ with tab2:
             else:
                 with st.spinner("🔍 실재고 데이터를 분석하여 답변을 작성하고 있습니다..."):
                     try:
-                        genai.configure(api_key=CLEAN_API_KEY)
+                        # [★핵심 패치] transport='rest'를 강제 적용하여 gRPC 포트 막힘으로 인한 504 무한 대기 원천 차단
+                        genai.configure(api_key=CLEAN_API_KEY, transport='rest')
+                        
+                        # 최신 표준 모델인 'gemini-3.8-flash' 사용
                         model = genai.GenerativeModel("gemini-3.8-flash")
-
+                        
                         # 챗봇에 전달할 컨텍스트 데이터 생성
                         ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
                         context_csv = df_inventory[ai_context_cols].to_csv(index=False)
-
+                        
                         prompt = f"""
                         너는 팀의 재고 및 오더 검증 전문가야.
                         아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
@@ -313,14 +316,14 @@ with tab2:
                         {user_question}
                         """
                         response = model.generate_content(prompt)
-
-                        # 안전한 텍스트 추출
+                        
+                        # 안전하게 답변 텍스트 추출
                         answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
-
-                        # 화면에 출력 후 세션에 영구 보존
+                        
+                        # 화면에 즉시 출력하고 세션에 보관
                         st.markdown(answer_text)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
-
+                        
                     except Exception as e:
                         err_msg = f"❌ AI 호출 중 에러 발생: {e}"
                         st.error(err_msg)

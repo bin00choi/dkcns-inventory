@@ -1,4 +1,6 @@
 import os
+import datetime
+import pytz
 import streamlit as st
 import pandas as pd
 import gspread
@@ -12,19 +14,26 @@ st.set_page_config(page_title="재고조회", layout="wide", initial_sidebar_sta
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# 3. 로그인 인증 함수 정의
+# 3. 한국 시간 기준 오늘 날짜 8자리 생성 함수
+def get_today_password():
+    """한국 시간(KST) 기준으로 오늘 날짜 8자리 문자열(YYYYMMDD)을 반환합니다."""
+    kst = pytz.timezone("Asia/Seoul")
+    today_kst = datetime.datetime.now(kst)
+    return today_kst.strftime("%Y%m%d")  # 예: "20261112"
+
+# 4. 로그인 인증 함수 정의
 def check_password():
-    """사용자가 입력한 비밀번호가 Secrets에 저장된 값과 일치하는지 확인합니다."""
+    """사용자가 입력한 비밀번호가 오늘 날짜 8자리와 일치하는지 확인합니다."""
     def password_entered():
-        # secrets에 비밀번호가 설정되어 있는지 먼저 확인
-        correct_password = st.secrets.get("ACCESS_PASSWORD", "admin1234")  # 미지정 시 기본값 대용
+        correct_password = get_today_password()
+
         if st.session_state["password_input"] == correct_password:
             st.session_state["authenticated"] = True
-            del st.session_state["password_input"]  # 보안 및 세션 정리를 위해 입력값 삭제
+            del st.session_state["password_input"]  # 보안을 위해 입력값 삭제
             st.toast("🟢 로그인에 성공했습니다!", icon="✅")
         else:
             st.session_state["authenticated"] = False
-            st.error("❌ 비밀번호가 올바르지 않습니다. 다시 입력해 주세요.")
+            st.error("❌ 비밀번호가 올바르지 않습니다. '오늘 날짜 8자리(예: 20261112)'를 입력해 주세요.")
 
     # 미인증 상태일 때 로그인 화면 표시
     if not st.session_state["authenticated"]:
@@ -32,23 +41,16 @@ def check_password():
         st.caption("본 시스템은 사내 관계자 및 외부 영업팀 전용 대시보드입니다.")
 
         st.text_input(
-            "영업팀 전용 PIN 비밀번호를 입력하세요",
+            "영업팀 전용 비밀번호를 입력하세요 (오늘 날짜 8자리)",
             type="password",
             on_change=password_entered,
             key="password_input",
-            help="전달받으신 공용 비밀번호를 입력한 후 Enter 키를 눌러주세요."
+            help="오늘 날짜를 YYYYMMDD 형식으로 입력하세요. (예: 20261112)"
         )
-        # 푸터 및 저작권 정보 등 로그인 화면 구성 제어
-        st.stop()  # 인증 성공 전에는 아래의 메인 앱 코드가 실행되지 않고 여기서 중단됨
+        st.stop()  # 인증 성공 전에는 아래 코드로 진행하지 않음
 
-# 4. 로그인 체크 실행
+# 5. 로그인 체크 실행
 check_password()
-
-# ==========================================
-# 5. [메인 대시보드 영역] 여기서부터 기존 app.py 코드 진행
-# ==========================================
-st.title("📋 창고 연동 실시간 재고 대시보드")
-st.write("인증에 성공하신 것을 환영합니다. 실시간 재고 현황을 조회할 수 있습니다.")
 
 # =========================================================================
 # [설정] 1. 웹 대시보드 기본 환경 설정 (스마트폰 모바일 뷰 최적화)

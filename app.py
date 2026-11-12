@@ -261,7 +261,7 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (오류 수정 및 Form 전송 안정화 버전)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (Form 기반 전송 완료)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -276,7 +276,7 @@ with tab2:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
-    # 3. 탭 내부 충돌을 방지하는 안정적인 st.form 입력 방식
+    # 3. 탭 내부 충돌 방지: st.form 입력 방식
     with st.form(key="chat_form", clear_on_submit=True):
         col_input, col_btn = st.columns()
         with col_input:
@@ -305,7 +305,7 @@ with tab2:
                         genai.configure(api_key=CLEAN_API_KEY, transport='rest')
                         model = genai.GenerativeModel("gemini-1.5-flash")
                         
-                        # 컨텍스트 최적화: 질문 관련 상위 행만 선별
+                        # 컨텍스트 최적화: 질문 관련 상위 행 선별
                         ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
                         
                         if len(df_inventory) > 30:
@@ -348,3 +348,4 @@ with tab2:
                         err_msg = f"❌ AI 호출 중 에러 발생: {e}"
                         st.error(err_msg)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+

@@ -264,10 +264,12 @@ with tab1:
 # [탭 2] 🤖 AI 챗봇에게 물어보기
 # -------------------------------------------------------------------------
 with tab2:
+    # 요청하신 직관적이고 군더더기 없는 설명과 예시로 업데이트 완료
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
     st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
     
     user_question = st.chat_input("질문 예시: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'")
+    
     if user_question:
         with st.chat_message("user"):
             st.write(user_question)
@@ -278,14 +280,14 @@ with tab2:
             else:
                 try:
                     genai.configure(api_key=CLEAN_API_KEY)
-
-                    # 최신 안정화 모델인 gemini-1.5-flash 모델로 변경 적용
-                    model = genai.GenerativeModel("gemini-1.5-flash")
-
+                    
+                    # 가장 안정적이고 호환성이 확실한 gemini-pro 모델명 사용
+                    model = genai.GenerativeModel("gemini-pro")
+                    
                     # 챗봇에 전달할 컨텍스트 컬럼 정의
                     ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
                     context_csv = df_inventory[ai_context_cols].to_csv(index=False)
-
+                    
                     prompt = f"""
                     너는 팀의 재고 및 오더 검증 전문가야.
                     아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.

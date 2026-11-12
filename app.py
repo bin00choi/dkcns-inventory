@@ -1,249 +1,158 @@
 import os
-import re
-import glob
+import streamlit as st
 import pandas as pd
 import gspread
-import streamlit as st
 from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 
 # =========================================================================
-# [설정] 🔑 발급받으신 Gemini API Key를 여기에 직접 채워주세요!
+# [설정] 1. 웹 대시보드 기본 환경 설정 (스마트폰 모바일 뷰 최적화)
 # =========================================================================
-GEMINI_API_KEY = "AQ.Ab8RN6JdegccPde7txASjVxPBOPRHDL40gaKhAP7_C1uhOYp5w" 
+st.set_page_config(
+    page_title="재고조회",
+    page_icon="📦",
+    layout="wide"
+)
 
-# 웹 페이지 기본 설정 (스마트폰 모바일 최적화 및 넓은 화면 모드)
-st.set_page_config(page_title="DKCNS 실시간 재고 에이전트", page_icon="📦", layout="wide")
+# =========================================================================
+# [보안] 2. 인증 키 안전 로드 (Streamlit Secrets)
+# =========================================================================
+# 1) Gemini API Key 추출
+try:
+    RAW_GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    RAW_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# API 키 자동 정제 (앞뒤 공백, 줄바꿈, 잘못 들어간 따옴표 완벽 제거)
-CLEAN_API_KEY = str(GEMINI_API_KEY).strip().replace("'", "").replace('"', "")
+CLEAN_API_KEY = str(RAW_GEMINI_KEY).strip().replace("'", "").replace('"', "")
 
-# 1. 폴더 내 특정 접두사로 시작하는 가장 최신 파일 탐색 함수
-def get_latest_file(folder_path, prefix):
-    search_pattern = os.path.join(folder_path, f"{prefix}*.*")
-    files = [
-        f for f in glob.glob(search_pattern) 
-        if f.lower().endswith(('.xlsx', '.xls', '.csv')) and not os.path.basename(f).startswith('~$')
-    ]
-    if not files:
-        return None
-    return max(files, key=os.path.getmtime)
+# 2) 구글 서비스 계정 인증 정보 추출 (Streamlit Secrets [gcp_service_account])
+try:
+    GCP_INFO = dict(st.secrets["gcp_service_account"])
+except Exception:
+    GCP_INFO = None
 
-# 2. 기호 정규화 함수
-def normalize_code(code_val):
-    if pd.isna(code_val):
-        return ""
-    return re.sub(r'[-_\s/()\\\[\]]', '', str(code_val)).upper()
 
-# 3. Excel 날짜 숫자를 YY-MM-DD 문자열로 파싱하는 함수
-def parse_excel_date(val):
-    if pd.isna(val) or val == "":
+# =========================================================================
+# [유틸] 3. PyArrow 타입 안정성 헬퍼 함수
+# =========================================================================
+def safe_holding_months(val):
+    """PyArrow 타입 변환 충돌(숫자 + 빈문자열 혼합 에러)을 원천 차단하는 문자열 변환"""
+    if pd.isna(val) or str(val).strip() == "":
         return ""
     try:
-        num = float(val)
-        return pd.to_datetime(num, unit='D', origin='1899-12-30').strftime('%y-%m-%d')
-    except:
-        try:
-            return pd.to_datetime(str(val).strip()).strftime('%y-%m-%d')
-        except:
-            return str(val).strip()
+        return str(int(float(val)))
+    except Exception:
+        return str(val).strip()
 
-# 4. 실시간 재고 대사 진행 함수 (정확한 대사 및 PyArrow 안정성 보강 버전)
-def load_local_reconciled_data():
-    TARGET_FOLDER = r"D:\0004.재고\재고파일"
-    
-    latest_daewon = get_latest_file(TARGET_FOLDER, "재고현황조회_")
-    latest_erp = get_latest_file(TARGET_FOLDER, "CCAPEC06600_")
-    
-    if not latest_daewon or not latest_erp:
-        st.error("🚨 'D:\\0004.재고\\재고파일' 폴더에 대원 재고 파일 또는 ERP 재고 파일이 존재하지 않습니다.")
-        st.stop()
-        
-    df_daewon = pd.read_excel(latest_daewon) if latest_daewon.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(latest_daewon)
-    df_erp = pd.read_excel(latest_erp) if latest_erp.lower().endswith(('.xlsx', '.xls')) else pd.read_csv(latest_erp)
-    
-    # 구품목코드 및 보유개월수 컬럼 탐색
-    erp_gu_col = [c for c in df_erp.columns if '구품목코드' in c]
-    gu_col_name = erp_gu_col[0] if erp_gu_col else '구품목코드\n(품목명2)'
-    
-    erp_month_col = [c for c in df_erp.columns if '보유' in c and '개월' in c]
-    month_col_name = erp_month_col[0] if erp_month_col else '보유\n개월수'
-    
-    # 정규화 임시 열 생성
-    df_daewon['clean_code'] = df_daewon['업체상품코드'].apply(normalize_code)
-    df_erp['clean_p_name'] = df_erp['품명'].apply(normalize_code)
-    df_erp['clean_gu_code'] = df_erp[gu_col_name].apply(normalize_code)
-    
-    results = []
-    for idx, row in df_daewon.iterrows():
-        clean_key = row['clean_code']
-        raw_code = row['업체상품코드']
-        
-        dw_item_code = row.get('상품코드', '')
-        dw_item_name = row.get('상품명', '')
-        dw_cur_qty = row.get('현재재고', 0)
-        dw_avail_qty = row.get('가용재고', 0)
-        
-        erp_match = df_erp[df_erp['clean_p_name'] == clean_key]
-        is_old_item = False
-        
-        if erp_match.empty:
-            erp_match = df_erp[df_erp['clean_gu_code'] == clean_key]
-            is_old_item = True
-            
-        if not erp_match.empty:
-            if len(erp_match) > 1 and is_old_item:
-                erp_match = erp_match.sort_values(by='No', ascending=False)
-                remark = "⚠️ 구코드 중복 (최근 등록건 매칭)"
-            else:
-                if str(raw_code) != str(erp_match.iloc[0]['품명']) and not is_old_item:
-                    remark = f"기호교정 매칭 ({raw_code} ➔ {erp_match.iloc[0]['품명']})"
-                else:
-                    remark = "정상 매칭" if not is_old_item else "구품목코드 매칭"
-            
-            erp_row = erp_match.iloc[0]
-            erp_p_name = erp_row.get('품명', '')
-            erp_gu_code = erp_row.get(gu_col_name, '')
-            erp_customer = erp_row.get('거래처명', '') if pd.notna(erp_row.get('거래처명', '')) else ""
-            erp_qty = erp_row.get('재고수량', 0)
-            erp_price = erp_row.get('입고단가', 0) if pd.notna(erp_row.get('입고단가', 0)) else 0
-            
-            erp_major = erp_row.get('대분류', '')
-            erp_mid = erp_row.get('중분류', '')
-            erp_sub = erp_row.get('소분류', '')
-            erp_spec = erp_row.get('적요(규격)', '')
-            erp_in_date = parse_excel_date(erp_row.get('입고일', ''))
-            
-            # 💡 [정밀 수정] PyArrow 타입 에러를 차단하기 위한 보유개월수 문자열 안전 포맷팅
-            raw_holding_m = erp_row.get(month_col_name)
-            if pd.notna(raw_holding_m) and str(raw_holding_m).strip() != "":
-                try:
-                    erp_holding_m = str(int(float(raw_holding_m)))
-                except:
-                    erp_holding_m = str(raw_holding_m).strip()
-            else:
-                erp_holding_m = ""
-        else:
-            # ERP 미등록 처리 (품명 및 거래처 완전 빈칸)
-            erp_p_name = ""
-            erp_gu_code = ""
-            erp_customer = ""
-            erp_qty = 0
-            erp_price = 0
-            erp_major = erp_mid = erp_sub = erp_spec = erp_in_date = erp_holding_m = ""
-            remark = "🚨 WBS 기안문서 누락 (ERP 미등록)"
-            
-        # 스마트 예외 판별
-        if erp_qty == 0 and dw_cur_qty > 0:
-            if erp_p_name != "":
-                status = "📦 선결제 미출고 (출고 대기)"
-                remark = f"업체 선결제 완료로 ERP 재고 선차감 (대원창고 {int(dw_cur_qty)}대 보관 중)"
-            else:
-                status = "🚨 WBS 미기안"
-        elif dw_cur_qty < erp_qty:
-            status = f"📊 부분출고 ({int(erp_qty - dw_cur_qty)}대 기출고)"
-        elif dw_cur_qty == erp_qty:
-            status = "✅ 정상 일치"
-        else:
-            if erp_p_name != "":
-                status = "📦 선결제 미출고 (출고 대기)"
-                remark = f"ERP 수량({int(erp_qty)}대)보다 실재고({int(dw_cur_qty)}대)가 많음 (선결제 추정)"
-            else:
-                status = f"⚠️ 실재고 초과 (+{int(dw_cur_qty - erp_qty)}대)"
-                
-        formatted_price = f"{int(erp_price):,}" if erp_price > 0 else ""
-        
-        results.append({
-            "대분류": str(erp_major),
-            "중분류": str(erp_mid),
-            "소분류": str(erp_sub),
-            "대원_상품코드": str(dw_item_code),
-            "대원_상품명": str(dw_item_name),
-            "대원_업체상품코드": str(raw_code),
-            "대원_현재재고": int(dw_cur_qty),
-            "대원_가용재고": int(dw_avail_qty),
-            "ERP_품명": str(erp_p_name),
-            "적요(규격)": str(erp_spec),
-            "거래처명": str(erp_customer),
-            "ERP_재고수량": int(erp_qty),
-            "입고단가": formatted_price,
-            "입고일": str(erp_in_date),
-            "보유개월수": str(erp_holding_m), # 안전하게 문자열 보존
-            
-            "상태": status,
-            "비고": remark,
-            "실재고금액": int(dw_cur_qty * erp_price),
-            "ERP_구품목코드": str(erp_gu_code)
-        })
-        
-    df_result = pd.DataFrame(results)
-    
-    # ERP 미등록 행(WBS 누락)을 표의 맨 아래로 자동 정렬
-    df_result['is_missing_erp'] = (df_result['ERP_품명'] == "") | (df_result['ERP_품명'].isna())
-    df_result = df_result.sort_values(by='is_missing_erp', ascending=True).drop(columns=['is_missing_erp'])
-    
-    return df_result, os.path.basename(latest_daewon), os.path.basename(latest_erp)
 
-# 데이터 가공 실행
-df_inventory, d_file, e_file = load_local_reconciled_data()
+# =========================================================================
+# [데이터 파이프라인] 4. 구글 스프레드시트 원격 로드
+# ※ 로컬 파일 대사/업로드는 사내 PC의 upload.py가 전담하므로, app.py는 시트만 조회합니다.
+# =========================================================================
+@st.cache_data(ttl=60)
+def load_cloud_sheet_data():
+    """구글 스프레드시트(dkcns_inventory)에서 사내 PC가 업로드해둔 최신 대사 데이터를 원격 조회"""
+    if not GCP_INFO:
+        raise ValueError("Streamlit Secrets에 [gcp_service_account] 설정이 없습니다. Advanced settings의 Secrets를 확인해 주세요.")
 
-# --- [웹 대시보드 화면 렌더링] ---
-st.title("📦 DKCNS 실시간 재고 및 오더 검증 에이전트")
-st.caption(f"📂 사용된 로컬 파일: 대원 SCM ({d_file}) | 사내 ERP ({e_file})")
+    service_dict = dict(GCP_INFO)
+    # private_key 내 개행문자(\n) 보정
+    if "private_key" in service_dict:
+        service_dict["private_key"] = service_dict["private_key"].replace("\\n", "\n")
 
-# 탭 구조 설계
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(service_dict, scope)
+    client = gspread.authorize(creds)
+    
+    # 사내 PC의 upload.py가 업로드한 dkcns_inventory 스프레드시트 열기
+    doc = client.open("dkcns_inventory")
+    sheet = doc.worksheet("실시간재고현황")
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+
+    # PyArrow 에러 방지를 위해 보유개월수 컬럼 문자열 타입 보정
+    if "보유개월수" in df.columns:
+        df["보유개월수"] = df["보유개월수"].apply(safe_holding_months)
+
+    return df
+
+
+# =========================================================================
+# [실행] 5. 데이터 적재
+# =========================================================================
+try:
+    df_inventory = load_cloud_sheet_data()
+except Exception as e:
+    st.error(f"🚨 구글 스프레드시트 데이터 로드 중 오류가 발생했습니다: {e}")
+    st.info("💡 사내 PC에서 `upload.py`가 정상 실행되어 구글 스프레드시트에 데이터가 올라갔는지 확인해 주세요.")
+    st.stop()
+
+
+# =========================================================================
+# [UI] 6. 대시보드 화면 렌더링
+# =========================================================================
+st.title("📦 재고조회")
+st.caption("📂 구글 스프레드시트(dkcns_inventory)와 실시간 연동된 클라우드 대시보드입니다.")
+
+# 탭 구성: 1) 실시간 재고 상세 조회, 2) AI 에이전트 대화
 tab1, tab2 = st.tabs(["🔍 실시간 재고 상세 조회", "🤖 AI 챗봇에게 물어보기"])
 
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        selected_status = st.multiselect("재고 진행상태 필터링", options=df_inventory["상태"].unique(), default=[])
+        status_options = df_inventory["상태"].unique() if "상태" in df_inventory.columns else []
+        selected_status = st.multiselect("재고 진행상태 필터링", options=status_options, default=[])
     with col2:
-        search_query = st.text_input("거래처명 또는 상품코드 검색")
-        
+        search_query = st.text_input("거래처명, 상품코드 또는 규격 검색")
+
     df_filtered = df_inventory.copy()
     if selected_status:
         df_filtered = df_filtered[df_filtered["상태"].isin(selected_status)]
     if search_query:
-        df_filtered = df_filtered[
-            df_filtered["거래처명"].str.contains(search_query, case=False, na=False) |
-            df_filtered["대원_업체상품코드"].str.contains(search_query, case=False, na=False) |
-            df_filtered["대원_상품명"].str.contains(search_query, case=False, na=False)
-        ]
-        
-    st.dataframe(df_filtered, use_container_width=True, height=500)
+        target_cols = [c for c in ["거래처명", "대원_업체상품코드", "대원_상품명", "적요(규격)", "대원_상품코드", "대분류", "중분류"] if c in df_filtered.columns]
+        if target_cols:
+            df_filtered = df_filtered[
+                df_filtered[target_cols].apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
+            ]
+
+    st.dataframe(df_filtered, use_container_width=True, height=520)
+
 
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
-    st.info("💡 참고: Gemini API Key가 app.py에 입력되어 있어 영업팀 챗봇이 활성화된 상태입니다.")
-    
-    user_question = st.chat_input("질문 예시: '선결제 미출고 품목은 총 몇 개야?', '대교 거래처 장비 현황은?'")
-    
+    st.caption("💡 영업 현장에서 스마트폰으로 32G 메모리 재고, 거래처별 납품 잔량, 선결제 미출고 현황 등을 자연어로 질의할 수 있습니다.")
+
+    user_question = st.chat_input("질문 예시: '32기가 메모리 탑재 장비 재고 있어?', '선결제 미출고 장비 현황은?'")
+
     if user_question:
         with st.chat_message("user"):
             st.write(user_question)
-            
+
         with st.chat_message("assistant"):
             if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
-                st.warning("⚠️ 챗봇 기능 활성화를 위해 `app.py` 소스코드 13번째 줄에 복사하신 API Key를 먼저 입력해 주세요!")
+                st.warning("⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요.")
             else:
                 try:
-                    # 정제 완료된 안전한 키로 구글 API 호출
                     genai.configure(api_key=CLEAN_API_KEY)
-                    model = genai.GenerativeModel("gemini-1.5-flash")
-                    
+                    model = genai.GenerativeModel("gemini-2.5-flash")
+
+                    # 구글 시트에서 가져온 대사 데이터를 CSV 형식 텍스트로 변환해 AI 컨텍스트에 주입
                     context_csv = df_inventory.to_csv(index=False)
-                    
+
                     prompt = f"""
                     너는 Daekyo CNS 영업팀의 재고 및 오더 검증 전문가야.
                     아래 실시간 재고 대사 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
-                    질문 이외의 개인정보나 인사말 등은 생략하고 필요한 핵심 정보만 명확히 대답해줘.
+                    사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
+                    질문 이외의 개인정보나 불필요한 시스템 안내는 생략하고 핵심 정보만 명확히 답변해.
                     금액 단위는 세련되게 세 자리 콤마와 원화(원)로 표기해.
 
-                    [재고 데이터]
+                    [실시간 재고 대사 데이터]
                     {context_csv}
 
-                    [질문]
+                    [영업 담당자 질문]
                     {user_question}
                     """
                     response = model.generate_content(prompt)

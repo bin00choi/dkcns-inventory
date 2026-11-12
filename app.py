@@ -79,7 +79,7 @@ if check_password():
         return df_inv, df_sum
 
     # -------------------------------------------------------------------------
-    # 📊 데이터 로드 및 초기 정제
+    # 📊 데이터 로드 및 초기 정제 (try-except 평탄화 구조 완전 격리)
     # -------------------------------------------------------------------------
     df_inventory = pd.DataFrame()
     df_summary = pd.DataFrame()
@@ -109,14 +109,13 @@ if check_password():
         existing_cols = [col for col in target_columns if col in df_inventory.columns]
         df_inventory = df_inventory[existing_cols].copy()
 
-        # 📌 ERP 미등록 및 WBS 미기안 항목 빈칸("") 치환 및 최하단 정렬 처리
+        # ERP 미등록 및 WBS 미기안 항목 빈칸("") 치환 및 최하단 정렬 처리
         unregistered_keywords = ["nan", "None", "-", "미등록", "ERP미등록", "ERP 미등록", "미기안", "WBS미기안", "WBS 미기안"]
         
         for col in ["대분류", "중분류", "소분류", "ERP_품명", "ERP_거래처명"]:
             if col in df_inventory.columns:
                 df_inventory[col] = df_inventory[col].astype(str).str.strip()
                 df_inventory[col] = df_inventory[col].replace(unregistered_keywords, "")
-                # 부분 문자열로 '미등록'이나 '미기안'이 들어간 경우에도 빈칸 처리 (ERP_품명, ERP_거래처명)
                 if col in ["ERP_품명", "ERP_거래처명"]:
                     mask_unreg = df_inventory[col].str.contains("미등록|미기안", case=False, na=False)
                     df_inventory.loc[mask_unreg, col] = ""
@@ -147,7 +146,7 @@ if check_password():
         ).drop(columns=["_sort_weight", "_cat1", "_cat2", "_cat3"]).reset_index(drop=True)
 
         # -------------------------------------------------------------------------
-        # 🖥️ 메인 타이틀 및 탭 구성
+        # 🖥️ 메인 타이틀 및 탭 구성 (원상복구 준수)
         # -------------------------------------------------------------------------
         st.title("📦 실시간 재고조회 시스템")
         st.caption(f"마지막 업데이트: {update_datetime}")
@@ -155,10 +154,9 @@ if check_password():
         tab1, tab2 = st.tabs(["📊 실시간 재고 리스트", "🤖 AI 챗봇에게 물어보기"])
 
         # -------------------------------------------------------------------------
-        # [탭 1] 📊 실시간 재고 리스트 (메인 화면 상단 대/중/소분류 필터 복구)
+        # [탭 1] 📊 실시간 재고 리스트 (메인 탭 상단 가로 3열 필터링 영역)
         # -------------------------------------------------------------------------
         with tab1:
-            # 사이드바가 아닌 탭 1 상단 가로 3열 배치
             f_col1, f_col2, f_col3 = st.columns(3)
             
             with f_col1:
@@ -167,7 +165,6 @@ if check_password():
                     cat1_list.append("미분류(빈칸)")
                 sel_cat1 = st.multiselect("대분류", cat1_list, placeholder="전체")
                 
-            # 대분류 필터 반영
             df_step1 = df_inventory.copy()
             if sel_cat1:
                 actual_cat1 = ["" if x == "미분류(빈칸)" else x for x in sel_cat1]
@@ -179,7 +176,6 @@ if check_password():
                     cat2_list.append("미분류(빈칸)")
                 sel_cat2 = st.multiselect("중분류", cat2_list, placeholder="전체")
                 
-            # 중분류 필터 반영
             df_step2 = df_step1.copy()
             if sel_cat2:
                 actual_cat2 = ["" if x == "미분류(빈칸)" else x for x in sel_cat2]
@@ -191,7 +187,6 @@ if check_password():
                     cat3_list.append("미분류(빈칸)")
                 sel_cat3 = st.multiselect("소분류", cat3_list, placeholder="전체")
                 
-            # 소분류 필터 반영
             df_filtered = df_step2.copy()
             if sel_cat3:
                 actual_cat3 = ["" if x == "미분류(빈칸)" else x for x in sel_cat3]
@@ -200,7 +195,7 @@ if check_password():
             st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
         # -------------------------------------------------------------------------
-        # [탭 2] 🤖 AI 챗봇에게 물어보기
+        # [탭 2] 🤖 AI 챗봇에게 물어보기 (다이렉트 고속 REST 10초 타임아웃 통신)
         # -------------------------------------------------------------------------
         with tab2:
             st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -267,9 +262,49 @@ if check_password():
 [질문]
 {user_question}"""
 
+                            # 구글 REST API 호출 페이로드 (대괄호 짝 완전 수복 완료)
                             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={CLEAN_API_KEY}"
                             headers = {"Content-Type": "application/json"}
                             payload = {
                                 "contents": [
                                     {"parts": [{"text": prompt}]}
+                                ]
+                            }
+
+                            resp = requests.post(api_url, headers=headers, json=payload, timeout=10)
+                            status_placeholder.empty()
+
+                            if resp.status_code == 200:
+                                resp_data = resp.json()
+                                candidates = resp_data.get("candidates", [])
+                                if candidates and "content" in candidates[0]:
+                                    parts = candidates[0]["content"].get("parts", [])
+                                    answer_text = parts[0].get("text", "⚠️ 생성된 답변 내용이 비어 있습니다.")
+                                else:
+                                    answer_text = "⚠️ 조건에 일치하는 재고 품목을 찾을 수 없습니다."
+                                    
+                                st.markdown(answer_text)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
+
+                            elif resp.status_code == 429:
+                                err_msg = "⚠️ 현재 구글 API 하루 무료 사용 한도(20회)를 모두 소진했습니다. 잠시 후 시도하거나 새 키를 등록해 주세요."
+                                st.warning(err_msg)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+
+                            else:
+                                err_json = resp.text
+                                err_msg = f"❌ API 응답 오류 (상태코드 {resp.status_code}): {err_json}"
+                                st.error(err_msg)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
                                 
+                        except requests.exceptions.Timeout:
+                            status_placeholder.empty()
+                            err_msg = "⚠️ 구글 서버 응답 시간(10초)이 초과되었습니다. 다시 한 번 질문하기를 눌러주세요."
+                            st.warning(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+
+                        except Exception as e:
+                            status_placeholder.empty()
+                            err_msg = f"❌ AI 호출 중 오류 발생: {e}"
+                            st.error(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})

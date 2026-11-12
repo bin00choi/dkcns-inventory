@@ -136,31 +136,22 @@ if check_password():
         df_inventory = df_inventory.drop(columns=["_sort_weight"])
 
         # -------------------------------------------------------------------------
-        # 🖥️ 메인 UI 화면 구성 (대시보드 상단)
+        # 🖥️ 원래의 깔끔한 메인 UI 화면 구성 (원상복구 완료)
         # -------------------------------------------------------------------------
-        st.title("📦 실시간 재고 통합 모니터링 시스템")
-        st.caption(f"🕒 실시간 데이터 동기화 시간: **{update_datetime}** (1분 주기 자동 새로고침 적용)")
-
-        # 상단 요약 카드로 현황 공유
-        if not df_summary.empty:
-            st.markdown("### 📊 실시간 검증 현황 요약")
-            cols_metrics = st.columns(len(df_summary.columns))
-            for i, col_name in enumerate(df_summary.columns):
-                val = df_summary.iloc[0][col_name]
-                cols_metrics[i].metric(label=col_name, value=f"{val:,}" if isinstance(val, (int, float)) else str(val))
-            st.markdown("---")
+        st.title("실시간 재고조회 시스템")  # 원상복구 타이틀
+        st.caption(f"동기화 시간: {update_datetime}")  # 원상복구 캡션
+        st.markdown("---")
 
         # -------------------------------------------------------------------------
         # 🗂️ 탭 레이아웃 구성
         # -------------------------------------------------------------------------
-        tab1, tab2 = st.tabs(["📋 실시간 재고 현황판", "🤖 AI 재고 질의 챗봇"])
+        tab1, tab2 = st.tabs(["실시간 재고조회", "AI 재고조회 챗봇"])  # 원상복구 탭 타이틀
 
-        # [탭 1] 실시간 재고 현황판
+        # [탭 1] 실시간 재고조회
         with tab1:
-            st.subheader("🔍 전체 실시간 재고 현황")
             st.dataframe(df_inventory, use_container_width=True, hide_index=True)
 
-        # [탭 2] AI 재고 질의 챗봇 (안정적인 Form 전송 및 무한 대기 해결 방식)
+        # [탭 2] AI 재고조회 챗봇 (안정적인 Form 전송 및 gemini-3.8-flash 적용)
         with tab2:
             st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
             st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
@@ -200,9 +191,9 @@ if check_password():
                     else:
                         with st.spinner("🔍 실재고 데이터를 분석하여 답변을 작성하고 있습니다..."):
                             try:
-                                # [★가장 중요] transport='rest' 옵션을 명시하여 gRPC 포트 막힘으로 인한 504 무한 대기 원천 차단
+                                # transport='rest' 옵션을 명시하여 gRPC 포트 막힘으로 인한 504 무한 대기 원천 차단
                                 genai.configure(api_key=CLEAN_API_KEY, transport='rest')
-                                model = genai.GenerativeModel("gemini-1.5-flash")
+                                model = genai.GenerativeModel("gemini-3.8-flash")
                                 
                                 # 대용량 질문 용량 초과 방지: 관련 있는 최상위 30개 행만 필터링 후 전송
                                 ai_context_cols = [c for c in target_columns if c in df_inventory.columns]

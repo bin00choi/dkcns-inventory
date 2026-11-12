@@ -19,7 +19,7 @@ def get_today_password():
     """한국 시간(KST) 기준으로 오늘 날짜 8자리 문자열(YYYYMMDD)을 반환합니다."""
     kst = pytz.timezone("Asia/Seoul")
     today_kst = datetime.datetime.now(kst)
-    return today_kst.strftime("%Y%m%d")  # 예: "20261112"
+    return today_kst.strftime("%Y%m%d")
 
 # 4. 로그인 인증 함수 정의
 def check_password():
@@ -33,19 +33,21 @@ def check_password():
             st.toast("🟢 로그인에 성공했습니다!", icon="✅")
         else:
             st.session_state["authenticated"] = False
-            st.error("❌ 비밀번호가 올바르지 않습니다. '오늘 날짜 8자리(예: 20261112)'를 입력해 주세요.")
+            # 비밀번호가 틀렸을 때 구체적인 힌트를 주지 않고 관리자 문의 메시지 표시
+            st.error("❌ 비밀번호가 올바르지 않습니다. 비밀번호를 모르실 경우 관리자에게 문의해 주세요.")
 
     # 미인증 상태일 때 로그인 화면 표시
     if not st.session_state["authenticated"]:
         st.subheader("🔐 DKCNS 재고조회 시스템 로그인")
         st.caption("본 시스템은 사내 관계자 및 외부 영업팀 전용 대시보드입니다.")
 
+        # 보안 극대화: 힌트(help)를 아예 제거하고, 입력창 안의 기본 문구만 표시
         st.text_input(
-            "영업팀 전용 비밀번호를 입력하세요 (오늘 날짜 8자리)",
+            "영업팀 전용 비밀번호를 입력하세요",
             type="password",
             on_change=password_entered,
             key="password_input",
-            help="오늘 날짜를 YYYYMMDD 형식으로 입력하세요. (예: 20261112)"
+            placeholder="비밀번호를 입력한 후 Enter 키를 눌러주세요"
         )
         st.stop()  # 인증 성공 전에는 아래 코드로 진행하지 않음
 

@@ -5,6 +5,51 @@ import gspread
 from google.oauth2.service_account import Credentials
 import google.generativeai as genai
 
+# 1. 페이지 기본 설정 및 스타일 정의
+st.set_page_config(page_title="재고조회", layout="wide", initial_sidebar_state="collapsed")
+
+# 2. 세션 상태(Session State) 초기화
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# 3. 로그인 인증 함수 정의
+def check_password():
+    """사용자가 입력한 비밀번호가 Secrets에 저장된 값과 일치하는지 확인합니다."""
+    def password_entered():
+        # secrets에 비밀번호가 설정되어 있는지 먼저 확인
+        correct_password = st.secrets.get("ACCESS_PASSWORD", "admin1234")  # 미지정 시 기본값 대용
+        if st.session_state["password_input"] == correct_password:
+            st.session_state["authenticated"] = True
+            del st.session_state["password_input"]  # 보안 및 세션 정리를 위해 입력값 삭제
+            st.toast("🟢 로그인에 성공했습니다!", icon="✅")
+        else:
+            st.session_state["authenticated"] = False
+            st.error("❌ 비밀번호가 올바르지 않습니다. 다시 입력해 주세요.")
+
+    # 미인증 상태일 때 로그인 화면 표시
+    if not st.session_state["authenticated"]:
+        st.subheader("🔐 DKCNS 재고조회 시스템 로그인")
+        st.caption("본 시스템은 사내 관계자 및 외부 영업팀 전용 대시보드입니다.")
+
+        st.text_input(
+            "영업팀 전용 PIN 비밀번호를 입력하세요",
+            type="password",
+            on_change=password_entered,
+            key="password_input",
+            help="전달받으신 공용 비밀번호를 입력한 후 Enter 키를 눌러주세요."
+        )
+        # 푸터 및 저작권 정보 등 로그인 화면 구성 제어
+        st.stop()  # 인증 성공 전에는 아래의 메인 앱 코드가 실행되지 않고 여기서 중단됨
+
+# 4. 로그인 체크 실행
+check_password()
+
+# ==========================================
+# 5. [메인 대시보드 영역] 여기서부터 기존 app.py 코드 진행
+# ==========================================
+st.title("📋 창고 연동 실시간 재고 대시보드")
+st.write("인증에 성공하신 것을 환영합니다. 실시간 재고 현황을 조회할 수 있습니다.")
+
 # =========================================================================
 # [설정] 1. 웹 대시보드 기본 환경 설정 (스마트폰 모바일 뷰 최적화)
 # =========================================================================

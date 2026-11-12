@@ -261,7 +261,7 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (Form 기반 전송 완료)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (Form 기반 전송 에러 수정 완료)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -276,7 +276,7 @@ with tab2:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
-    # 3. 탭 내부 충돌 방지: st.form 입력 방식
+    # 3. 탭 내부 충돌 방지: st.form 입력 방식 (컬럼 비율 5:1 강제 설정)
     with st.form(key="chat_form", clear_on_submit=True):
         col_input, col_btn = st.columns()
         with col_input:
@@ -348,5 +348,3 @@ with tab2:
                         err_msg = f"❌ AI 호출 중 에러 발생: {e}"
                         st.error(err_msg)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-
-

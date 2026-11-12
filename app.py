@@ -151,34 +151,37 @@ if check_password():
         with tab1:
             st.dataframe(df_inventory, use_container_width=True, hide_index=True)
 
-        # [탭 2] AI 재고조회 챗봇 (안정적인 Form 전송 및 최신 gemini-3.8-flash 적용)
+        # -------------------------------------------------------------------------
+# [탭 2] 🤖 AI 재고조회 챗봇 (무한 대기 원천 차단: 경량 표준 UI 적용)
+# -------------------------------------------------------------------------
         with tab2:
             st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
             st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
             
-            # 대화 세션 상태 초기화
+            # 1. 이전 대화 기록 보관 세션 초기화
             if "chat_messages" not in st.session_state:
                 st.session_state["chat_messages"] = []
-
-            # 이전 대화 렌더링
+        
+            # 2. 대화 기록 화면 출력
             for msg in st.session_state["chat_messages"]:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
+                    
+            # 3. 락(Lock)을 유발하는 st.form 대신 가벼운 단독 입력창과 액션 버튼 배치
+            col_input, col_btn = st.columns()
+            with col_input:
+                user_question = st.text_input(
+                    "질문 입력",
+                    placeholder="예: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'",
+                    label_visibility="collapsed",
+                    key="chat_input_text"
+                )
+            with col_btn:
+                ask_clicked = st.button("질문하기", use_container_width=True, type="primary")
             
-            # 탭 내 충돌 방지를 위한 안정적인 st.form 입력 방식 (2분할 지정)
-            with st.form(key="chat_form", clear_on_submit=True):
-                col_input, col_btn = st.columns(2)
-                with col_input:
-                    user_question = st.text_input(
-                        "질문 입력",
-                        placeholder="예: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'",
-                        label_visibility="collapsed"
-                    )
-                with col_btn:
-                    submit_btn = st.form_submit_button("질문하기", use_container_width=True)
-            
-            # 전송 제출 시 메인 로직 가동 (구조 정상화 완료)
-            if submit_btn and user_question.strip():
+            # 4. 질문 실행 로직 (스피너 락 방지 및 즉시 응답 렌더링)
+            if ask_clicked and user_question.strip():
+                # 사용자 질문 표시 및 세션 추가
                 st.session_state["chat_messages"].append({"role": "user", "content": user_question})
                 with st.chat_message("user"):
                     st.markdown(user_question)
@@ -189,57 +192,55 @@ if check_password():
                         st.warning(warn_msg)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
                     else:
-                        with st.spinner("🔍 실재고 데이터를 분석하여 답변을 작성하고 있습니다..."):
-                            try:
-                                # transport='rest' 옵션을 명시하여 gRPC 포트 막힘으로 인한 504 무한 대기 원천 차단
-                                genai.configure(api_key=CLEAN_API_KEY, transport='rest')
+                        status_placeholder = st.empty()
+                        status_placeholder.info("⚡데이터를 검색하고 있습니다...")
+                        
+                        try:
+                            # REST 방식 강제 및 타임아웃 방지
+                            genai.configure(api_key=CLEAN_API_KEY, transport='rest')
+                            model = genai.GenerativeModel("gemini-3.8-flash")
+                            
+                            # 데이터 전송 최적화: 질문 관련 상위 행 우선 추출 (단순/고속 방식)
+                            ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
+                            
+                            # 키워드 검색을 판다스 고속 벡터 연산으로 처리하여 딜레이 제거
+                            search_keywords = [w.strip() for w in user_question.split() if len(w.strip()) >= 2]
+                            matched_df = df_inventory.copy()
+                            
+                            if search_keywords:
+                                mask = pd.Series(False, index=matched_df.index)
+                                for kw in search_keywords:
+                                    for col in ai_context_cols:
+                                        mask = mask | matched_df[col].astype(str).str.contains(kw, case=False, na=False)
+                                filtered_df = matched_df[mask]
+                                sample_df = filtered_df.head(30) if len(filtered_df) > 0 else matched_df.head(30)
+                            else:
+                                sample_df = matched_df.head(30)
                                 
-                                # 404 에러를 유발하던 구형 1.5 모델 대신 최신 'gemini-3.8-flash' 모델 적용
-                                model = genai.GenerativeModel("gemini-3.8-flash")
-                                
-                                # 대용량 질문 용량 초과 방지: 관련 있는 최상위 30개 행만 필터링 후 전송
-                                ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
-                                
-                                if len(df_inventory) > 30:
-                                    keywords = [w.strip().lower() for w in user_question.split() if len(w.strip()) >= 2]
-                                    if keywords:
-                                        row_scores = []
-                                        for idx, row in df_inventory.iterrows():
-                                            row_text = " ".join(row.astype(str).values).lower()
-                                            score = sum(1 for kw in keywords if kw in row_text)
-                                            row_scores.append((score, idx))
-                                        row_scores.sort(key=lambda x: x[0], reverse=True)
-                                        best_indices = [idx for score, idx in row_scores[:30]]
-                                        sample_df = df_inventory.loc[best_indices]
-                                    else:
-                                        sample_df = df_inventory.head(30)
-                                else:
-                                    sample_df = df_inventory
-                                    
-                                context_csv = sample_df[ai_context_cols].to_csv(index=False)
-                                
-                                prompt = f"""
-                                너는 팀의 재고 및 오더 검증 전문가야.
-                                아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
-                                사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
-                                질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
-                                금액 단위는 세 자리 콤마와 원화(원)로 표기해.
-                                [업데이트 일시]: {update_datetime}
-                                [창고 연동 실재고 데이터]
-                                {context_csv}
-                                [영업 담당자 질문]
-                                {user_question}
-                                """
-                                response = model.generate_content(prompt)
-                                answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
-                                
-                                st.markdown(answer_text)
-                                st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
-                                
-                            except Exception as e:
-                                err_msg = f"❌ AI 호출 중 에러 발생: {e}"
-                                st.error(err_msg)
-                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-
-    except Exception as general_err:
-        st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
+                            context_csv = sample_df[ai_context_cols].to_csv(index=False)
+                            
+                            prompt = f"""너는 실시간 재고 관리 시스템의 오더 검증 전문가야.
+        아래 제공된 실재고 데이터(CSV)만을 기반으로 사실에 입각하여 답변해.
+        질문과 관련된 품목의 [품명], [규격/적요], [대원_실재고수량], [창고_실재고수량], [공급가액] 정보를 깔끔한 표(Markdown Table) 형식으로 정리해줘.
+        절대 없는 수량이나 품목을 지어내지 말고, 데이터에 없으면 '해당 조건에 맞는 실재고가 확인되지 않습니다'라고 명확히 안내해.
+        
+        [업데이트 일시]: {update_datetime}
+        [창고 연동 실재고 데이터]
+        {context_csv}
+        
+        [질문]
+        {user_question}"""
+        
+                            response = model.generate_content(prompt)
+                            answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
+                            
+                            # 로딩 텍스트 즉시 제거 후 최종 답변 출력
+                            status_placeholder.empty()
+                            st.markdown(answer_text)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
+                            
+                        except Exception as e:
+                            status_placeholder.empty()
+                            err_msg = f"❌ AI 호출 중 에러 발생: {e}"
+                            st.error(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})

@@ -2,7 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import google.generativeai as genai
 
 # =========================================================================
@@ -56,17 +56,29 @@ def load_cloud_sheet_data():
         raise ValueError("Streamlit Secrets에 [gcp_service_account] 설정이 없습니다. Advanced settings의 Secrets를 확인해 주세요.")
 
     service_dict = dict(GCP_INFO)
-    # private_key 내 개행문자(\n) 보정
+
+    # 1) 도메인 오타 자동 보정 (NameResolutionError 원천 방지)
+    # oauth2.google.com -> oauth2.googleapis.com
+    if "token_uri" in service_dict:
+        service_dict["token_uri"] = service_dict["token_uri"].replace("oauth2.google.com", "oauth2.googleapis.com")
+    else:
+        service_dict["token_uri"] = "https://oauth2.googleapis.com/token"
+
+    if "auth_uri" in service_dict:
+        service_dict["auth_uri"] = service_dict["auth_uri"].replace("accounts.google.com/o/oauth2/auth", "accounts.google.com/o/oauth2/auth")
+
+    # 2) private_key 개행문자(\n) 보정
     if "private_key" in service_dict:
         service_dict["private_key"] = service_dict["private_key"].replace("\\n", "\n")
 
-    scope = [
-        "https://spreadsheets.google.com/feeds",
+    # 3) 구글 공식 최신 google-auth 인증 방식 적용 (gspread 권장 방식)
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(service_dict, scope)
-    client = gspread.authorize(creds)
-    
+    credentials = Credentials.from_service_account_info(service_dict, scopes=scopes)
+    client = gspread.authorize(credentials)
+
     # 사내 PC의 upload.py가 업로드한 dkcns_inventory 스프레드시트 열기
     doc = client.open("dkcns_inventory")
     sheet = doc.worksheet("실시간재고현황")
@@ -87,7 +99,7 @@ try:
     df_inventory = load_cloud_sheet_data()
 except Exception as e:
     st.error(f"🚨 구글 스프레드시트 데이터 로드 중 오류가 발생했습니다: {e}")
-    st.info("💡 사내 PC에서 `upload.py`가 정상 실행되어 구글 스프레드시트에 데이터가 올라갔는지 확인해 주세요.")
+    st.info("💡 Secrets의 GCP 키 정보 또는 사내 PC upload.py 실행 여부를 확인해 주세요.")
     st.stop()
 
 
@@ -143,7 +155,7 @@ with tab2:
                     context_csv = df_inventory.to_csv(index=False)
 
                     prompt = f"""
-                    너는 영업팀의 재고 및 오더 검증 전문가야.
+                    너는 Daekyo CNS 영업팀의 재고 및 오더 검증 전문가야.
                     아래 실시간 재고 대사 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
                     사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
                     질문 이외의 개인정보나 불필요한 시스템 안내는 생략하고 핵심 정보만 명확히 답변해.

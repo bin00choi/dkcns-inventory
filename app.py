@@ -282,7 +282,7 @@ with tab2:
                     genai.configure(api_key=CLEAN_API_KEY)
                     
                     # 가장 안정적이고 호환성이 확실한 gemini-pro 모델명 사용
-                    model = genai.GenerativeModel("gemini-2.5-flash")
+                    model = genai.GenerativeModel("gemini-3.8-flash")
                     
                     # 챗봇에 전달할 컨텍스트 컬럼 정의
                     ai_context_cols = [c for c in target_columns if c in df_inventory.columns]

@@ -265,26 +265,27 @@ with tab1:
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
-    st.caption("💡 영업 현장에서 스마트폰으로 32G 메모리 재고, 거래처별 납품 잔량, 특정 규격 실재고 수량을 자연어로 질의할 수 있습니다.")
+    st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
     
-    user_question = st.chat_input("질문 예시: '32기가 메모리 탑재 장비 재고 있어?', '대원 가용재고 남은 장비 목록은?'")
+    user_question = st.chat_input("질문 예시: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'")
     if user_question:
         with st.chat_message("user"):
             st.write(user_question)
             
-        with st.chat_message("assistant"):
+       with st.chat_message("assistant"):
             if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
                 st.warning("⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요.")
             else:
                 try:
                     genai.configure(api_key=CLEAN_API_KEY)
-                    model = genai.GenerativeModel("gemini-2.5-flash")
-                    
+
+                    # 최신 안정화 모델인 gemini-1.5-flash 모델로 변경 적용
+                    model = genai.GenerativeModel("gemini-1.5-flash")
+
                     # 챗봇에 전달할 컨텍스트 컬럼 정의
                     ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
                     context_csv = df_inventory[ai_context_cols].to_csv(index=False)
-                    
-                    # [★요구사항 반영] 회사 정보 및 특정 사명(DKCNS, Daekyo) 전면 제거 및 페르소나 축소
+
                     prompt = f"""
                     너는 팀의 재고 및 오더 검증 전문가야.
                     아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.

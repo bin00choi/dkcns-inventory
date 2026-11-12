@@ -261,7 +261,7 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (대량 데이터 전송 지연 및 504 에러 완전 해결)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (무한 로딩 완벽 해결: Form 기반 전송)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -271,16 +271,26 @@ with tab2:
     if "chat_messages" not in st.session_state:
         st.session_state["chat_messages"] = []
 
-    # 2. 화면이 새로고침되어도 이전 대화 내용이 사라지지 않고 그대로 렌더링
+    # 2. 대화 기록 화면 렌더링
     for msg in st.session_state["chat_messages"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
-    # 3. 사용자 질문 입력창
-    user_question = st.chat_input("질문 예시: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'")
+    # 3. 탭 내부 충돌을 방지하는 안정적인 st.form 입력 방식 (무한 대기 원천 차단)
+    with st.form(key="chat_form", clear_on_submit=True):
+        col_input, col_btn = st.columns()
+        with col_input:
+            user_question = st.text_input(
+                "질문 입력",
+                placeholder="예: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'",
+                label_visibility="collapsed"
+            )
+        with col_btn:
+            submit_btn = st.form_submit_button("질문하기", use_container_width=True)
     
-    if user_question:
-        # 사용자 질문을 화면에 띄우고 세션에 저장
+    # 4. 질문 전송 시 실행 로직
+    if submit_btn and user_question.strip():
+        # 사용자 질문 즉시 표시 및 세션 저장
         st.session_state["chat_messages"].append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
@@ -291,30 +301,22 @@ with tab2:
                 st.warning(warn_msg)
                 st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
             else:
-                with st.spinner("🔍 실재고 데이터를 정밀 분석하여 답변을 작성하고 있습니다..."):
+                with st.spinner("🔍 실재고 데이터를 분석하여 답변을 작성하고 있습니다..."):
                     try:
-                        # [조치 1] 무한 대기 방지를 위한 HTTPS REST 전송 규격 적용
                         genai.configure(api_key=CLEAN_API_KEY, transport='rest')
+                        model = genai.GenerativeModel("gemini-1.5-flash")
                         
-                        # 구글 공식 추천 최신 모델 사용
-                        model = genai.GenerativeModel("gemini-3.8-flash")
-                        
-                        # [★조치 2: 스마트 가벼운 요약 기술] 전체 데이터를 다 보내지 않고, 질문과 연관된 데이터만 스마트 필터링하여 전송 용량 최적화
+                        # 컨텍스트 최적화: 질문 관련 상위 행만 선별
                         ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
                         
                         if len(df_inventory) > 30:
-                            # 사용자의 질문에서 검색 키워드를 공백 기준으로 분리 추출
                             keywords = [w.strip().lower() for w in user_question.split() if len(w.strip()) >= 2]
-                            
                             if keywords:
-                                # 각 행마다 키워드 매칭 점수를 계산
                                 row_scores = []
                                 for idx, row in df_inventory.iterrows():
                                     row_text = " ".join(row.astype(str).values).lower()
                                     score = sum(1 for kw in keywords if kw in row_text)
                                     row_scores.append((score, idx))
-                                
-                                # 매칭률이 높은 상위 30개 항목만 추출
                                 row_scores.sort(key=lambda x: x[0], reverse=True)
                                 best_indices = [idx for score, idx in row_scores[:30]]
                                 sample_df = df_inventory.loc[best_indices]
@@ -323,7 +325,6 @@ with tab2:
                         else:
                             sample_df = df_inventory
                             
-                        # 가볍게 최적화된 CSV 데이터 생성 (전송 타임아웃 504 원천 차단)
                         context_csv = sample_df[ai_context_cols].to_csv(index=False)
                         
                         prompt = f"""
@@ -333,17 +334,14 @@ with tab2:
                         질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
                         금액 단위는 세 자리 콤마와 원화(원)로 표기해.
                         [업데이트 일시]: {update_datetime}
-                        [창고 연동 실재고 데이터 (질문 연관 추출본)]
+                        [창고 연동 실재고 데이터]
                         {context_csv}
                         [영업 담당자 질문]
                         {user_question}
                         """
                         response = model.generate_content(prompt)
-                        
-                        # 안전하게 답변 텍스트 추출
                         answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
                         
-                        # 화면에 즉시 출력하고 세션에 보관
                         st.markdown(answer_text)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
                         
@@ -351,3 +349,4 @@ with tab2:
                         err_msg = f"❌ AI 호출 중 에러 발생: {e}"
                         st.error(err_msg)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+

@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. 보안 로그인 게이트 (오늘 날짜 8자리, 힌트 제거)
+# 2. 보안 로그인 게이트 (오늘 날짜 8자리, 관리자 문의 유도)
 # ==========================================
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -41,10 +41,10 @@ def check_password():
             st.error("❌ 비밀번호가 올바르지 않습니다. 비밀번호를 모르실 경우 관리자에게 문의해 주세요.")
 
     if not st.session_state["authenticated"]:
-        # 요청하신 간결하고 명확한 문구로 전면 교체
+        # 요청에 맞춘 안전하고 깔끔한 로그인 UI
         st.subheader("🔐 재고조회 패스워드 입력")
         st.caption("본 시스템은 사내 관계자 전용 대시보드입니다.")
-
+        
         st.text_input(
             "영업팀 전용 비밀번호를 입력하세요",
             type="password",
@@ -58,22 +58,20 @@ def check_password():
 check_password()
 
 # ==========================================
-# 3. 구글 스프레드시트 데이터 로드 (캐싱 적용)
+# 3. 구글 스프레드시트 데이터 로드 (캐싱 및 안정성 패치 완료)
 # ==========================================
 @st.cache_data(ttl=60)
 def load_inventory_data():
-    """구글 스프레드시트에서 실시간 재고 데이터와 업데이트 일시를 불러옵니다."""
+    """구글 스프레드시트에서 실시간 재고 데이터와 업데이트 일시를 안전하게 불러옵니다."""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # Streamlit Secrets에서 서비스 계정 정보 로드 및 token_uri 보정
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    if "token_uri" not in creds_dict or not creds_dict["token_uri"]:
-        creds_dict["token_uri"] = "https://oauth2.googleapis.com/token"
+    # Secrets 원본 구조를 유지하여 연동 오류(HTTPSConnectionPool) 완벽 복구
+    creds_info = st.secrets["gcp_service_account"]
         
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
     client = gspread.authorize(creds)
     
     # 스프레드시트 열기
@@ -106,7 +104,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 4. 데이터 전처리 (정렬, 빈칸 치환, 타입 보정)
+# 4. 데이터 전처리 (정렬, 미등록 항목 빈칸 치환, 타입 보정)
 # ==========================================
 df = df_raw.copy()
 
@@ -128,9 +126,10 @@ if not df.empty:
         (df.get("재고상태", pd.Series([""] * len(df))).astype(str).str.contains("미기안", na=False))
     )
     df["_sort_key"] = is_unregistered.astype(int)
+    # 미등록/미기안 항목은 정렬 가중치에 의해 최하단으로 정렬됨
     df = df.sort_values(by=["_sort_key", "대원_업체상품코드"], ascending=[True, True]).drop(columns=["_sort_key"])
 
-    # (3) '미등록 품명', '미등록 거래처' 및 결측치 텍스트를 빈칸("")으로 깔끔하게 치환
+    # (3) '미등록 품명', '미등록 거래처' 및 결측치 텍스트를 빈칸("")으로 치환
     replace_targets = ["미등록 품명", "미등록 거래처", "미등록품명", "미등록거래처", "nan", "None", "<NA>"]
     for col in ["ERP_품명", "거래처명", "대분류", "중분류", "소분류", "적요(규격)"]:
         df[col] = df[col].astype(str).replace(replace_targets, "").str.strip()
@@ -244,14 +243,14 @@ with tab2:
         
         if "messages" not in st.session_state:
             st.session_state["messages"] = [
-                {"role": "assistant", "content": "안녕하세요! 찾으시는 모델명, 규격, 거래처 또는 재고 조건을 말씀해 주세요."}
+                {"role": "assistant", "content": "안녕하세요! 찾으시는 모델명, 규격, 거래처 혹은 가용재고 수량 등을 자유롭게 질문해 주세요."}
             ]
 
         for msg in st.session_state["messages"]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        if user_prompt := st.chat_input("질문을 입력하세요 (예: 가용재고 10개 이상인 모니터 알려줘)"):
+        if user_prompt := st.chat_input("질문을 입력하세요 (예: 대분류가 노트북인 품목 리스트 요약해 줘)"):
             st.session_state["messages"].append({"role": "user", "content": user_prompt})
             with st.chat_message("user"):
                 st.markdown(user_prompt)

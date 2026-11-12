@@ -38,12 +38,12 @@ def check_password():
 
     # 미인증 상태일 때 로그인 화면 표시
     if not st.session_state["authenticated"]:
-        st.subheader("🔐 DKCNS 재고조회 시스템 로그인")
-        st.caption("본 시스템은 사내 관계자 및 외부 영업팀 전용 대시보드입니다.")
+        st.subheader("🔐재고조회 패스워드 입력")
+        st.caption("본 시스템은 사내 관계자전용 대시보드입니다.")
 
         # 보안 극대화: 힌트(help)를 아예 제거하고, 입력창 안의 기본 문구만 표시
         st.text_input(
-            "영업팀 전용 비밀번호를 입력하세요",
+            "비밀번호를 입력하세요",
             type="password",
             on_change=password_entered,
             key="password_input",

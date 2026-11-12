@@ -138,20 +138,20 @@ if check_password():
         # -------------------------------------------------------------------------
         # 🖥️ 원래의 깔끔한 메인 UI 화면 구성 (원상복구 완료)
         # -------------------------------------------------------------------------
-        st.title("실시간 재고조회 시스템")  # 원상복구 타이틀
-        st.caption(f"동기화 시간: {update_datetime}")  # 원상복구 캡션
+        st.title("실시간 재고조회 시스템")  # 원래 타이틀 복구
+        st.caption(f"동기화 시간: {update_datetime}")  # 원래 디자인 복구
         st.markdown("---")
 
         # -------------------------------------------------------------------------
         # 🗂️ 탭 레이아웃 구성
         # -------------------------------------------------------------------------
-        tab1, tab2 = st.tabs(["실시간 재고조회", "AI 재고조회 챗봇"])  # 원상복구 탭 타이틀
+        tab1, tab2 = st.tabs(["실시간 재고조회", "AI 재고조회 챗봇"])  # 원래 탭 이름 복구
 
         # [탭 1] 실시간 재고조회
         with tab1:
             st.dataframe(df_inventory, use_container_width=True, hide_index=True)
 
-        # [탭 2] AI 재고조회 챗봇 (안정적인 Form 전송 및 gemini-3.8-flash 적용)
+        # [탭 2] AI 재고조회 챗봇 (안정적인 Form 전송 및 최신 gemini-3.8-flash 적용)
         with tab2:
             st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
             st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
@@ -193,6 +193,8 @@ if check_password():
                             try:
                                 # transport='rest' 옵션을 명시하여 gRPC 포트 막힘으로 인한 504 무한 대기 원천 차단
                                 genai.configure(api_key=CLEAN_API_KEY, transport='rest')
+                                
+                                # [★교체 완료] 404 에러를 유발하던 구형 1.5 모델 대신 최신 'gemini-3.8-flash' 모델 적용
                                 model = genai.GenerativeModel("gemini-3.8-flash")
                                 
                                 # 대용량 질문 용량 초과 방지: 관련 있는 최상위 30개 행만 필터링 후 전송
@@ -209,35 +211,4 @@ if check_password():
                                         row_scores.sort(key=lambda x: x[0], reverse=True)
                                         best_indices = [idx for score, idx in row_scores[:30]]
                                         sample_df = df_inventory.loc[best_indices]
-                                    else:
-                                        sample_df = df_inventory.head(30)
-                                else:
-                                    sample_df = df_inventory
-                                    
-                                context_csv = sample_df[ai_context_cols].to_csv(index=False)
-                                
-                                prompt = f"""
-                                너는 팀의 재고 및 오더 검증 전문가야.
-                                아래 창고 연동 실재고 데이터(CSV)에 기반해서만 답변하고, 없는 이야기는 지어내지 마.
-                                사용자가 32G, 64G 등 메모리 스펙이나 특정 부품 규격으로 질문할 경우 '대원_상품명', '적요(규격)', '대원_업체상품코드' 컬럼을 복합 탐색하여 대원 실재고 수량을 바탕으로 명확히 답해줘.
-                                질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
-                                금액 단위는 세 자리 콤마와 원화(원)로 표기해.
-                                [업데이트 일시]: {update_datetime}
-                                [창고 연동 실재고 데이터]
-                                {context_csv}
-                                [영업 담당자 질문]
-                                {user_question}
-                                """
-                                response = model.generate_content(prompt)
-                                answer_text = response.text if hasattr(response, "text") and response.text else "⚠️ 답변을 생성하지 못했습니다. 질문을 구체화해 주세요."
-                                
-                                st.markdown(answer_text)
-                                st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
-                                
-                            except Exception as e:
-                                err_msg = f"❌ AI 호출 중 에러 발생: {e}"
-                                st.error(err_msg)
-                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-
-    except Exception as general_err:
-        st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
+      

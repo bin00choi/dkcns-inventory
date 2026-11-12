@@ -261,7 +261,7 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (504 에러 및 무한 대기 해결 버전)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (대량 데이터 전송 지연 및 504 에러 완전 해결)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -291,17 +291,40 @@ with tab2:
                 st.warning(warn_msg)
                 st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
             else:
-                with st.spinner("🔍 실재고 데이터를 분석하여 답변을 작성하고 있습니다..."):
+                with st.spinner("🔍 실재고 데이터를 정밀 분석하여 답변을 작성하고 있습니다..."):
                     try:
-                        # [★핵심 패치] transport='rest'를 강제 적용하여 gRPC 포트 막힘으로 인한 504 무한 대기 원천 차단
+                        # [조치 1] 무한 대기 방지를 위한 HTTPS REST 전송 규격 적용
                         genai.configure(api_key=CLEAN_API_KEY, transport='rest')
                         
-                        # 최신 표준 모델인 'gemini-3.8-flash' 사용
+                        # 구글 공식 추천 최신 모델 사용
                         model = genai.GenerativeModel("gemini-3.8-flash")
                         
-                        # 챗봇에 전달할 컨텍스트 데이터 생성
+                        # [★조치 2: 스마트 가벼운 요약 기술] 전체 데이터를 다 보내지 않고, 질문과 연관된 데이터만 스마트 필터링하여 전송 용량 최적화
                         ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
-                        context_csv = df_inventory[ai_context_cols].to_csv(index=False)
+                        
+                        if len(df_inventory) > 30:
+                            # 사용자의 질문에서 검색 키워드를 공백 기준으로 분리 추출
+                            keywords = [w.strip().lower() for w in user_question.split() if len(w.strip()) >= 2]
+                            
+                            if keywords:
+                                # 각 행마다 키워드 매칭 점수를 계산
+                                row_scores = []
+                                for idx, row in df_inventory.iterrows():
+                                    row_text = " ".join(row.astype(str).values).lower()
+                                    score = sum(1 for kw in keywords if kw in row_text)
+                                    row_scores.append((score, idx))
+                                
+                                # 매칭률이 높은 상위 30개 항목만 추출
+                                row_scores.sort(key=lambda x: x[0], reverse=True)
+                                best_indices = [idx for score, idx in row_scores[:30]]
+                                sample_df = df_inventory.loc[best_indices]
+                            else:
+                                sample_df = df_inventory.head(30)
+                        else:
+                            sample_df = df_inventory
+                            
+                        # 가볍게 최적화된 CSV 데이터 생성 (전송 타임아웃 504 원천 차단)
+                        context_csv = sample_df[ai_context_cols].to_csv(index=False)
                         
                         prompt = f"""
                         너는 팀의 재고 및 오더 검증 전문가야.
@@ -310,7 +333,7 @@ with tab2:
                         질문 이외의 불필요한 시스템 안내는 생략하고 영업 담당자에게 필요한 핵심 재고 정보만 일목요연하게 표나 글머리기호로 정리해.
                         금액 단위는 세 자리 콤마와 원화(원)로 표기해.
                         [업데이트 일시]: {update_datetime}
-                        [창고 연동 실재고 데이터]
+                        [창고 연동 실재고 데이터 (질문 연관 추출본)]
                         {context_csv}
                         [영업 담당자 질문]
                         {user_question}

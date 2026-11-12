@@ -261,7 +261,7 @@ with tab1:
     st.dataframe(df_display, use_container_width=True, height=550)
 
 # -------------------------------------------------------------------------
-# [탭 2] 🤖 AI 챗봇에게 물어보기 (무한 로딩 완벽 해결: Form 기반 전송)
+# [탭 2] 🤖 AI 챗봇에게 물어보기 (오류 수정 및 Form 전송 안정화 버전)
 # -------------------------------------------------------------------------
 with tab2:
     st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
@@ -276,7 +276,7 @@ with tab2:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
-    # 3. 탭 내부 충돌을 방지하는 안정적인 st.form 입력 방식 (무한 대기 원천 차단)
+    # 3. 탭 내부 충돌을 방지하는 안정적인 st.form 입력 방식
     with st.form(key="chat_form", clear_on_submit=True):
         col_input, col_btn = st.columns()
         with col_input:
@@ -290,7 +290,6 @@ with tab2:
     
     # 4. 질문 전송 시 실행 로직
     if submit_btn and user_question.strip():
-        # 사용자 질문 즉시 표시 및 세션 저장
         st.session_state["chat_messages"].append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
@@ -349,4 +348,3 @@ with tab2:
                         err_msg = f"❌ AI 호출 중 에러 발생: {e}"
                         st.error(err_msg)
                         st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-

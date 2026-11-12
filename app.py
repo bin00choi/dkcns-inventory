@@ -272,7 +272,7 @@ with tab2:
         with st.chat_message("user"):
             st.write(user_question)
             
-       with st.chat_message("assistant"):
+        with st.chat_message("assistant"):
             if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
                 st.warning("⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요.")
             else:

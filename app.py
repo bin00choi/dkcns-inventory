@@ -78,9 +78,6 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
 
-    if st.session_state.get("password_correct", False):
-        return True
-
     st.markdown("### 🔑 패스워드 입력")
     st.text_input(
         "비밀번호를 입력하세요",
@@ -196,6 +193,34 @@ if check_password():
         ).drop(columns=["_sort_weight", "_cat1", "_cat2", "_cat3"]).reset_index(drop=True)
 
         # -------------------------------------------------------------------------
+        # 📋 컬럼명 유연 매칭 및 "입고일(Invoice)" 동적 이름 지정
+        # -------------------------------------------------------------------------
+        # 11개 요청 컬럼과 스프레드시트 내 컬럼 매핑
+        target_mappings = {
+            "대원_업체상품코드": ["대원_업체상품코드"],
+            "대원_상품명": ["대원_상품명"],
+            "대원_현재재고": ["대원_현재재고", "대원_실재고수량"],
+            "대원_가용재고": ["대원_가용재고"],
+            "ERP_품명": ["ERP_품명"],
+            "적요(규격)": ["적요(규격)"],
+            "거래처명": ["거래처명", "ERP_거래처명"],
+            "ERP_재고수량": ["ERP_재고수량", "창고_실재고수량"],
+            "입고단가": ["입고단가", "공급가액"],
+            "입고일(Invoice)": ["입고일(Invoice)", "입고일"],
+            "보유개월수": ["보유개월수"]
+        }
+
+        # 원본 데이터프레임의 컬럼 이름을 유연하게 매칭하여 이름 변경
+        rename_dict = {}
+        for target_name, alternatives in target_mappings.items():
+            for alt in alternatives:
+                if alt in df_inventory.columns:
+                    rename_dict[alt] = target_name
+                    break
+        
+        df_inventory = df_inventory.rename(columns=rename_dict)
+
+        # -------------------------------------------------------------------------
         # 🖥️ 메인 UI 화면 구성
         # -------------------------------------------------------------------------
         st.title("🔍 재고 조회")
@@ -212,35 +237,35 @@ if check_password():
             f_col1, f_col2, f_col3 = st.columns(3)
             
             with f_col1:
-                cat1_list = sorted([x for x in df_inventory["대분류"].unique().tolist() if x != ""])
-                if "" in df_inventory["대분류"].values:
+                cat1_list = sorted([x for x in df_inventory["대분류"].unique().tolist() if x != ""]) if "대분류" in df_inventory.columns else []
+                if "대분류" in df_inventory.columns and "" in df_inventory["대분류"].values:
                     cat1_list.append("미분류(빈칸)")
                 sel_cat1 = st.multiselect("대분류", cat1_list, placeholder="전체")
                 
             df_step1 = df_inventory.copy()
-            if sel_cat1:
+            if "대분류" in df_step1.columns and sel_cat1:
                 actual_cat1 = ["" if x == "미분류(빈칸)" else x for x in sel_cat1]
                 df_step1 = df_step1[df_step1["대분류"].isin(actual_cat1)]
                 
             with f_col2:
-                cat2_list = sorted([x for x in df_step1["중분류"].unique().tolist() if x != ""])
-                if "" in df_step1["중분류"].values:
+                cat2_list = sorted([x for x in df_step1["중분류"].unique().tolist() if x != ""]) if "중분류" in df_step1.columns else []
+                if "중분류" in df_step1.columns and "" in df_step1["중분류"].values:
                     cat2_list.append("미분류(빈칸)")
                 sel_cat2 = st.multiselect("중분류", cat2_list, placeholder="전체")
                 
             df_step2 = df_step1.copy()
-            if sel_cat2:
+            if "중분류" in df_step2.columns and sel_cat2:
                 actual_cat2 = ["" if x == "미분류(빈칸)" else x for x in sel_cat2]
                 df_step2 = df_step2[df_step2["중분류"].isin(actual_cat2)]
                 
             with f_col3:
-                cat3_list = sorted([x for x in df_step2["소분류"].unique().tolist() if x != ""])
-                if "" in df_step2["소분류"].values:
+                cat3_list = sorted([x for x in df_step2["소분류"].unique().tolist() if x != ""]) if "소분류" in df_step2.columns else []
+                if "소분류" in df_step2.columns and "" in df_step2["소분류"].values:
                     cat3_list.append("미분류(빈칸)")
                 sel_cat3 = st.multiselect("소분류", cat3_list, placeholder="전체")
                 
             df_filtered = df_step2.copy()
-            if sel_cat3:
+            if "소분류" in df_filtered.columns and sel_cat3:
                 actual_cat3 = ["" if x == "미분류(빈칸)" else x for x in sel_cat3]
                 df_filtered = df_filtered[df_filtered["소분류"].isin(actual_cat3)]
                 
@@ -255,21 +280,53 @@ if check_password():
             fixed_columns = [
                 "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", 
                 "ERP_품명", "적요(규격)", "거래처명", "ERP_재고수량", 
-                "입고단가", "입고일", "보유개월수"
+                "입고단가", "입고일(Invoice)", "보유개월수"
             ]
             
-            # 실제 데이터프레임에 있는 핵심 컬럼만 추출
-            available_fixed = [col for col in fixed_columns if col in df_filtered.columns]
-            # 그 외의 나머지 컬럼들 추출
-            remaining_cols = [col for col in df_filtered.columns if col not in available_fixed]
+            # 실제 존재 컬럼 및 부재 시 보완
+            for col in fixed_columns:
+                if col not in df_filtered.columns:
+                    df_filtered[col] = ""
             
-            # 순서 재정렬된 데이터프레임 생성
-            df_ordered = df_filtered[available_fixed + remaining_cols].copy()
+            # 나머지 추가 컬럼 필터링
+            remaining_cols = [col for col in df_filtered.columns if col not in fixed_columns]
+            
+            # 최종 정렬 컬럼 세트 생성
+            df_ordered = df_filtered[fixed_columns + remaining_cols].copy()
+            
+            # -------------------------------------------------------------------------
+            # 💲 데이터 정밀 포맷팅 (입고단가 콤마 추가, 입고일(Invoice) yyyy-mm-dd 강제)
+            # -------------------------------------------------------------------------
+            # 입고단가 콤마(,) 포맷팅 함수
+            def format_price(val):
+                if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
+                    return ""
+                try:
+                    num = float(str(val).replace(",", "").strip())
+                    return f"{int(num):,}"
+                except ValueError:
+                    return val
+
+            # 입고일 YYYY-MM-DD 형식 포맷팅 함수
+            def format_date(val):
+                if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
+                    return ""
+                try:
+                    # pandas로 파싱 시도
+                    dt_parsed = pd.to_datetime(val)
+                    return dt_parsed.strftime('%Y-%m-%d')
+                except Exception:
+                    # 파싱 실패 시 공백 기준 앞의 부분만 추출하여 간소화
+                    return str(val).split(" ")[0].strip()
+
+            df_ordered["입고단가"] = df_ordered["입고단가"].apply(format_price)
+            df_ordered["입고일(Invoice)"] = df_ordered["입고일(Invoice)"].apply(format_date)
             
             # '순번' 컬럼을 가장 맨 앞에 생성 및 삽입
+            df_ordered = df_ordered.reset_index(drop=True)
             df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
             
-            # 최종 대형 데이터 프레임 표출
+            # 최종 데이터 프레임 표출
             st.dataframe(df_ordered, use_container_width=True, hide_index=True)
 
         with tab2:
@@ -365,15 +422,4 @@ if check_password():
                                 err_json = resp.text
                                 err_msg = f"❌ API 응답 오류 (상태코드 {resp.status_code}): {err_json}"
                                 st.error(err_msg)
-                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-                                
-                        except requests.exceptions.Timeout:
-                            status_placeholder.empty()
-                            err_msg = "⚠️ 구글 서버 응답 시간(10초)이 초과되었습니다. 다시 한 번 질문하기를 눌러주세요."
-                            st.warning(err_msg)
-                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-                        except Exception as e:
-                            status_placeholder.empty()
-                            err_msg = f"❌ AI 호출 중 오류 발생: {e}"
-                            st.error(err_msg)
-                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                                st.session_state["chat_

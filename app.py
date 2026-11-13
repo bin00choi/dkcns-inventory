@@ -21,9 +21,6 @@ st.markdown("""
     width: 0px !important;
     overflow: hidden;
 }
-.stSpinner {
-    display: none !important;
-}
 
 /* 2. 가로, 세로 스크롤바 선명하게 강화 */
 ::-webkit-scrollbar {
@@ -141,21 +138,25 @@ if check_password():
         return df_inv, df_sum, sheet_updated_raw
 
     # -------------------------------------------------------------------------
-    # 🛠️ 데이터 로드 및 초기 정제 (try-except 구조 평탄화)
+    # 🛠️ 데이터 로드 및 초기 정제
     # -------------------------------------------------------------------------
     df_inventory = pd.DataFrame()
     df_summary = pd.DataFrame()
     sheet_updated_time = ""
     data_loaded = False
     
-    # 데이터를 연동하는 동안 사용자에게 진행 상황을 중앙에 텍스트로 피드백 제공 (요청하신 문구로 반영)
-    with st.empty():
-        st.info("🔑 인증이 완료되었습니다. 데이터를 불러오는 중입니다...")
-        try:
-            df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
-            data_loaded = True
-        except Exception as general_err:
-            st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
+    # 플레이스홀더를 사용해 로딩 안내문을 임시 생성
+    status_holder = st.empty()
+    status_holder.info("🔑 인증이 완료되었습니다. 데이터를 불러오는 중입니다...")
+    
+    try:
+        df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
+        data_loaded = True
+        # 데이터가 성공적으로 정상 로드 완료되면 로딩 메시지를 완벽하게 비웁니다
+        status_holder.empty()
+    except Exception as general_err:
+        status_holder.empty()
+        st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
 
     # 데이터가 정상 로드되었을 때만 후속 로직 진행
     if data_loaded:
@@ -222,7 +223,6 @@ if check_password():
             "보유개월수": ["보유개월수"]
         }
 
-        # 원본 데이터프레임의 컬럼 이름을 유연하게 매칭하여 이름 변경
         rename_dict = {}
         for target_name, alternatives in target_mappings.items():
             for alt in alternatives:
@@ -324,11 +324,9 @@ if check_password():
                 if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
                     return ""
                 try:
-                    # pandas로 파싱 시도
                     dt_parsed = pd.to_datetime(val)
                     return dt_parsed.strftime('%Y-%m-%d')
                 except Exception:
-                    # 파싱 실패 시 공백 기준 앞의 부분만 추출하여 간소화
                     return str(val).split(" ")[0].strip()
 
             df_ordered["입고단가"] = df_ordered["입고단가"].apply(format_price)

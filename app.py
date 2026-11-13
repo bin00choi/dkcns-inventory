@@ -11,10 +11,10 @@ import json
 # Page 기본 설정
 st.set_page_config(page_title="재고 조회", layout="wide")
 
-# CSS 스타일 적용 (모바일 1라인 강제 유지, '러닝중' 숨김, 스크롤바 가시성 증대)
+# CSS 스타일 적용 (모바일 1라인 강제 유지, 우측 상단 기본 'Running...' 숨김, 스크롤바 가시성 증대)
 st.markdown("""
 <style>
-/* 1. 우측 상단 Running... 스피너 및 Streamlit 기본 스피너 강제 숨김 */
+/* 1. 우측 상단 Running... 기본 위젯만 깔끔하게 숨김 */
 [data-testid="stStatusWidget"] {
     visibility: hidden;
     height: 0px !important;
@@ -69,6 +69,10 @@ def check_password():
     kst = pytz.timezone('Asia/Seoul')
     correct_password = datetime.now(kst).strftime('%Y%m%d')
     
+    # 패스워드가 이미 맞게 통과된 상태라면 로그인창을 건너뜀
+    if st.session_state.get("password_correct", False):
+        return True
+
     def password_entered():
         user_input = st.session_state.get("password_input", "")
         if user_input == correct_password:
@@ -85,8 +89,14 @@ def check_password():
         on_change=password_entered,
         key="password_input"
     )
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("비밀번호가 올바르지 않습니다. 관리자에게 문의해 주세요.")
+    
+    if "password_correct" in st.session_state:
+        if not st.session_state["password_correct"]:
+            st.error("비밀번호가 올바르지 않습니다. 관리자에게 문의해 주세요.")
+        else:
+            # 패스워드가 올바를 경우 즉시 화면을 갱신하여 메인 앱 로딩으로 진입시킴
+            st.rerun()
+            
     return False
 
 # 비밀번호 통과 시에만 메인 프로그램 실행
@@ -138,11 +148,14 @@ if check_password():
     sheet_updated_time = ""
     data_loaded = False
     
-    try:
-        df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
-        data_loaded = True
-    except Exception as general_err:
-        st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
+    # 데이터를 연동하는 동안 사용자에게 진행 상황을 중앙에 텍스트로 피드백 제공 (요청하신 문구로 반영)
+    with st.empty():
+        st.info("🔑 인증이 완료되었습니다. 데이터를 불러오는 중입니다...")
+        try:
+            df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
+            data_loaded = True
+        except Exception as general_err:
+            st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
 
     # 데이터가 정상 로드되었을 때만 후속 로직 진행
     if data_loaded:
@@ -195,7 +208,6 @@ if check_password():
         # -------------------------------------------------------------------------
         # 📋 컬럼명 유연 매칭 및 "입고일(Invoice)" 동적 이름 지정
         # -------------------------------------------------------------------------
-        # 11개 요청 컬럼과 스프레드시트 내 컬럼 매핑
         target_mappings = {
             "대원_업체상품코드": ["대원_업체상품코드"],
             "대원_상품명": ["대원_상품명"],

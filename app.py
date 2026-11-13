@@ -341,4 +341,96 @@ if check_password():
             
             col_input, col_btn = st.columns((5, 1))
             with col_input:
-                user_question = st.text_inp
+                user_question = st.text_input(
+                    "질문 입력",
+                    placeholder="예: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'",
+                    label_visibility="collapsed",
+                    key="chat_input_text"
+                )
+            with col_btn:
+                ask_clicked = st.button("질문하기", use_container_width=True, type="primary")
+            
+            if ask_clicked and user_question.strip():
+                st.session_state["chat_messages"].append({"role": "user", "content": user_question})
+                with st.chat_message("user"):
+                    st.markdown(user_question)
+                    
+                with st.chat_message("assistant"):
+                    if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
+                        warn_msg = "⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요."
+                        st.warning(warn_msg)
+                        st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
+                    else:
+                        status_placeholder = st.empty()
+                        status_placeholder.info("🔍 실재고 데이터를 검색하고 있습니다...")
+                        
+                        try:
+                            # 1. 고속 판다스 벡터 검색으로 프롬프트 데이터 추출 (경량화)
+                            ai_context_cols = [c for c in df_inventory.columns if c not in ["_sort_weight", "_cat1", "_cat2", "_cat3"]]
+                            search_keywords = [w.strip().lower() for w in user_question.split() if len(w.strip()) >= 2]
+                            matched_df = df_inventory.copy()
+                            
+                            if search_keywords:
+                                mask = pd.Series(False, index=matched_df.index)
+                                for kw in search_keywords:
+                                    for col in ai_context_cols:
+                                        mask = mask | matched_df[col].astype(str).str.contains(kw, case=False, na=False)
+                                filtered_df = matched_df[mask]
+                                sample_df = filtered_df.head(30) if len(filtered_df) > 0 else matched_df.head(30)
+                            else:
+                                sample_df = matched_df.head(30)
+                                
+                            context_csv = sample_df[ai_context_cols].to_csv(index=False)
+                            
+                            prompt = f"""너는 실시간 재고 관리 시스템의 오더 검증 전문가야.
+아래 제공된 실재고 데이터(CSV)만을 기반으로 사실에 입각하여 답변해.
+질문과 관련된 품목의 [품명], [규격/적요], [대원_실재고수량], [창고_실재고수량], [공급가액] 정보를 깔끔한 표(Markdown Table) 형식으로 정리해줘.
+절대 없는 수량이나 품목을 지어내지 말고, 데이터에 없으면 '해당 조건에 맞는 실재고가 확인되지 않습니다'라고 명확히 안내해.
+[업데이트 일시]: {update_datetime}
+
+[창고 연동 실재고 데이터]
+{context_csv}
+
+[질문]
+{user_question}"""
+                            # 2. [무한 대기 박멸] 구글 REST API 다이렉트 호출 (타임아웃 10초 강제)
+                            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={CLEAN_API_KEY}"
+                            headers = {"Content-Type": "application/json"}
+                            payload = {
+                                "contents": [
+                                    {"parts": [{"text": prompt}]}
+                                ]
+                            }
+                            resp = requests.post(api_url, headers=headers, json=payload, timeout=10)
+                            status_placeholder.empty()
+                            if resp.status_code == 200:
+                                resp_data = resp.json()
+                                candidates = resp_data.get("candidates", [])
+                                if candidates and "content" in candidates[0]:
+                                    parts = candidates[0]["content"].get("parts", [])
+                                    answer_text = parts[0].get("text", "⚠️ 생성된 답변 내용이 비어 있습니다.")
+                                else:
+                                    answer_text = "⚠️ 조건에 일치하는 재고 품목을 찾을 수 없습니다."
+                                    
+                                st.markdown(answer_text)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
+                            elif resp.status_code == 429:
+                                err_msg = "⚠️ 현재 구글 API 하루 무료 사용 한도(20회)를 모두 소진했습니다. 잠시 후 시도하거나 새 키를 등록해 주세요."
+                                st.warning(err_msg)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                            else:
+                                err_json = resp.text
+                                err_msg = f"❌ API 응답 오류 (상태코드 {resp.status_code}): {err_json}"
+                                st.error(err_msg)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                                
+                        except requests.exceptions.Timeout:
+                            status_placeholder.empty()
+                            err_msg = "⚠️ 구글 서버 응답 시간(10초)이 초과되었습니다. 다시 한 번 질문하기를 눌러주세요."
+                            st.warning(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                        except Exception as e:
+                            status_placeholder.empty()
+                            err_msg = f"❌ AI 호출 중 오류 발생: {e}"
+                            st.error(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})

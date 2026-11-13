@@ -9,15 +9,66 @@ import requests
 import json
 
 # Page 기본 설정
-st.set_page_config(page_title="실시간 재고조회 시스템", layout="wide")
+st.set_page_config(page_title="재고 조회", layout="wide")
+
+# CSS 스타일 적용 (모바일 1라인 강제 유지, '러닝중' 숨김, 스크롤바 가시성 증대)
+st.markdown("""
+<style>
+/* 1. 우측 상단 Running... 스피너 및 Streamlit 기본 스피너 강제 숨김 */
+[data-testid="stStatusWidget"] {
+    visibility: hidden;
+    height: 0px !important;
+    width: 0px !important;
+    overflow: hidden;
+}
+.stSpinner {
+    display: none !important;
+}
+
+/* 2. 가로, 세로 스크롤바 선명하게 강화 */
+::-webkit-scrollbar {
+    width: 12px !important;
+    height: 12px !important;
+    display: block !important;
+}
+::-webkit-scrollbar-thumb {
+    background-color: #a0a0a0 !important;
+    border-radius: 6px !important;
+    border: 2px solid #ffffff !important;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: #707070 !important;
+}
+::-webkit-scrollbar-track {
+    background: #f1f1f1 !important;
+}
+
+/* 3. 모바일 화면에서 대/중/소분류 다중 필터 한 줄 강제 배치 */
+@media (max-width: 640px) {
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div {
+        min-width: 0 !important;
+        flex: 1 1 0% !important;
+    }
+    /* 셀렉트박스 폰트 및 패딩 최적화 */
+    div[data-baseweb="select"] {
+        font-size: 11px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # -------------------------------------------------------------------------
-# 🔐 KST 기준 오늘 날짜 8자리(YYYYMMDD) 로그인 게이트웨이
+# 🔑 KST 기준 오늘 날짜 8자리(YYYYMMDD) 패스워드 입력 게이트웨이
 # -------------------------------------------------------------------------
 def check_password():
     kst = pytz.timezone('Asia/Seoul')
     correct_password = datetime.now(kst).strftime('%Y%m%d')
-
+    
     def password_entered():
         user_input = st.session_state.get("password_input", "")
         if user_input == correct_password:
@@ -30,24 +81,21 @@ def check_password():
     if st.session_state.get("password_correct", False):
         return True
 
-    st.markdown("### 🔐 시스템 접속 인증")
+    st.markdown("### 🔑 패스워드 입력")
     st.text_input(
         "비밀번호를 입력하세요",
         type="password",
         on_change=password_entered,
         key="password_input"
     )
-
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("비밀번호가 올바르지 않습니다. 관리자에게 문의해 주세요.")
-
     return False
 
 # 비밀번호 통과 시에만 메인 프로그램 실행
 if check_password():
-
     # -------------------------------------------------------------------------
-    # ⚙️ 구글 스프레드시트 연동 설정
+    # ☁️ 구글 스프레드시트 및 Gemini API 연동 설정
     # -------------------------------------------------------------------------
     @st.cache_data(ttl=60)
     def load_cloud_sheet_data():
@@ -68,6 +116,13 @@ if check_password():
         
         spreadsheet = client.open("dkcns_inventory")
         
+        # 구글시트 실제 최종 변경일시 획득
+        sheet_updated_raw = "알 수 없음"
+        try:
+            sheet_updated_raw = spreadsheet.updated
+        except Exception:
+            pass
+            
         sheet_realtime = spreadsheet.worksheet("실시간재고현황")
         data_realtime = sheet_realtime.get_all_records()
         df_inv = pd.DataFrame(data_realtime)
@@ -76,40 +131,36 @@ if check_password():
         data_summary = sheet_summary.get_all_records()
         df_sum = pd.DataFrame(data_summary)
         
-        return df_inv, df_sum
+        return df_inv, df_sum, sheet_updated_raw
 
     # -------------------------------------------------------------------------
-    # 📊 데이터 로드 및 초기 정제 (try-except 평탄화 구조 완전 격리)
+    # 🛠️ 데이터 로드 및 초기 정제 (try-except 구조 평탄화)
     # -------------------------------------------------------------------------
     df_inventory = pd.DataFrame()
     df_summary = pd.DataFrame()
+    sheet_updated_time = ""
     data_loaded = False
-
+    
     try:
-        df_inventory, df_summary = load_cloud_sheet_data()
+        df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
         data_loaded = True
     except Exception as general_err:
-        st.error(f"❌ 데이터 로드 중 에러가 발생했습니다: {general_err}")
+        st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
 
+    # 데이터가 정상 로드되었을 때만 후속 로직 진행
     if data_loaded:
-        kst_tz = pytz.timezone('Asia/Seoul')
-        update_datetime = datetime.now(kst_tz).strftime('%Y-%m-%d %H:%M:%S')
+        # 구글시트 업데이트 시간 KST 포맷팅
+        try:
+            parsed_time = pd.to_datetime(sheet_updated_time).tz_convert('Asia/Seoul')
+            update_datetime = parsed_time.strftime('%Y-%m-%d %H:%M:%S KST')
+        except Exception:
+            kst_tz = pytz.timezone('Asia/Seoul')
+            update_datetime = datetime.now(kst_tz).strftime('%Y-%m-%d %H:%M:%S KST')
         
         RAW_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
         CLEAN_API_KEY = RAW_API_KEY.strip() if RAW_API_KEY else ""
 
-        # 📌 14개 고정 컬럼 설정 (대/중/소분류 최전방 배치)
-        target_columns = [
-            "대분류", "중분류", "소분류", "품목코드", "적요(규격)", 
-            "창고_실재고수량", "대원_실재고수량", "매칭상태", 
-            "대원_상품명", "대원_업체상품코드", "기안상태", 
-            "ERP_품명", "ERP_거래처명", "공급가액"
-        ]
-        
-        existing_cols = [col for col in target_columns if col in df_inventory.columns]
-        df_inventory = df_inventory[existing_cols].copy()
-
-        # ERP 미등록 및 WBS 미기안 항목 빈칸("") 치환 및 최하단 정렬 처리
+        # ERP 미등록 및 WBS 미기안 항목 빈칸("") 치환
         unregistered_keywords = ["nan", "None", "-", "미등록", "ERP미등록", "ERP 미등록", "미기안", "WBS미기안", "WBS 미기안"]
         
         for col in ["대분류", "중분류", "소분류", "ERP_품명", "ERP_거래처명"]:
@@ -120,7 +171,7 @@ if check_password():
                     mask_unreg = df_inventory[col].str.contains("미등록|미기안", case=False, na=False)
                     df_inventory.loc[mask_unreg, col] = ""
 
-        # 📌 최하단 배치를 위한 정렬 가중치 계산 (정상=0, 미등록/빈칸=1)
+        # 최하단 배치를 위한 정렬 가중치 계산 (정상=0, 미등록/빈칸=1)
         def get_sort_weight(row):
             erp_name = str(row.get("ERP_품명", "")).strip()
             client_name = str(row.get("ERP_거래처명", "")).strip()
@@ -132,31 +183,32 @@ if check_password():
                 "미등록" in match_status or "미기안" in draft_status):
                 return 1
             return 0
-
+            
         df_inventory["_sort_weight"] = df_inventory.apply(get_sort_weight, axis=1)
         
         # 대/중/소분류 빈칸도 정상 항목 내에서는 아래로 가도록 보조 정렬키 생성
         df_inventory["_cat1"] = df_inventory["대분류"].apply(lambda x: "ㅎㅎㅎ" if x == "" else x)
         df_inventory["_cat2"] = df_inventory["중분류"].apply(lambda x: "ㅎㅎㅎ" if x == "" else x)
         df_inventory["_cat3"] = df_inventory["소분류"].apply(lambda x: "ㅎㅎㅎ" if x == "" else x)
-
         df_inventory = df_inventory.sort_values(
             by=["_sort_weight", "_cat1", "_cat2", "_cat3"],
             ascending=[True, True, True, True]
         ).drop(columns=["_sort_weight", "_cat1", "_cat2", "_cat3"]).reset_index(drop=True)
 
         # -------------------------------------------------------------------------
-        # 🖥️ 메인 타이틀 및 탭 구성 (원상복구 준수)
+        # 🖥️ 메인 UI 화면 구성
         # -------------------------------------------------------------------------
-        st.title("📦 실시간 재고조회 시스템")
+        st.title("🔍 재고 조회")
         st.caption(f"마지막 업데이트: {update_datetime}")
-
-        tab1, tab2 = st.tabs(["📊 실시간 재고 리스트", "🤖 AI 챗봇에게 물어보기"])
-
-        # -------------------------------------------------------------------------
-        # [탭 1] 📊 실시간 재고 리스트 (메인 탭 상단 가로 3열 필터링 영역)
-        # -------------------------------------------------------------------------
+        st.markdown("---")
+        
+        tab1, tab2 = st.tabs(["📋 실시간 재고 리스트", "💬 AI 챗봇에게 물어보기"])
+        
         with tab1:
+            # 1. 원래 존재하던 통합 검색창 복구
+            search_query = st.text_input("🔍 품목명 / 코드 등 검색", "", placeholder="원하시는 검색어를 입력하시면 목록이 필터링됩니다.")
+            
+            # 2. 대분류 / 중분류 / 소분류 필터 가로 배치 (모바일 1라인 강제 유지 CSS가 적용됨)
             f_col1, f_col2, f_col3 = st.columns(3)
             
             with f_col1:
@@ -191,19 +243,41 @@ if check_password():
             if sel_cat3:
                 actual_cat3 = ["" if x == "미분류(빈칸)" else x for x in sel_cat3]
                 df_filtered = df_filtered[df_filtered["소분류"].isin(actual_cat3)]
+                
+            # 3. 통합 검색창 입력 시 전체 컬럼 대상 필터링 수행
+            if search_query.strip():
+                search_mask = pd.Series(False, index=df_filtered.index)
+                for col in df_filtered.columns:
+                    search_mask = search_mask | df_filtered[col].astype(str).str.contains(search_query.strip(), case=False, na=False)
+                df_filtered = df_filtered[search_mask]
 
-            st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+            # 4. 순번 넘버링 추가 및 요청된 11개 핵심 컬럼 고정 순서 정렬
+            fixed_columns = [
+                "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", 
+                "ERP_품명", "적요(규격)", "거래처명", "ERP_재고수량", 
+                "입고단가", "입고일", "보유개월수"
+            ]
+            
+            # 실제 데이터프레임에 있는 핵심 컬럼만 추출
+            available_fixed = [col for col in fixed_columns if col in df_filtered.columns]
+            # 그 외의 나머지 컬럼들 추출
+            remaining_cols = [col for col in df_filtered.columns if col not in available_fixed]
+            
+            # 순서 재정렬된 데이터프레임 생성
+            df_ordered = df_filtered[available_fixed + remaining_cols].copy()
+            
+            # '순번' 컬럼을 가장 맨 앞에 생성 및 삽입
+            df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
+            
+            # 최종 대형 데이터 프레임 표출
+            st.dataframe(df_ordered, use_container_width=True, hide_index=True)
 
-        # -------------------------------------------------------------------------
-        # [탭 2] 🤖 AI 챗봇에게 물어보기 (다이렉트 고속 REST 10초 타임아웃 통신)
-        # -------------------------------------------------------------------------
         with tab2:
             st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
             st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
             
             if "chat_messages" not in st.session_state:
                 st.session_state["chat_messages"] = []
-
             for msg in st.session_state["chat_messages"]:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
@@ -231,10 +305,11 @@ if check_password():
                         st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
                     else:
                         status_placeholder = st.empty()
-                        status_placeholder.info("⚡ 실재고 데이터를 검색하고 있습니다...")
+                        status_placeholder.info("🔍 실재고 데이터를 검색하고 있습니다...")
                         
                         try:
-                            ai_context_cols = [c for c in target_columns if c in df_inventory.columns]
+                            # 1. 고속 판다스 벡터 검색으로 프롬프트 데이터 추출 (경량화)
+                            ai_context_cols = [c for c in df_inventory.columns if c not in ["_sort_weight", "_cat1", "_cat2", "_cat3"]]
                             search_keywords = [w.strip().lower() for w in user_question.split() if len(w.strip()) >= 2]
                             matched_df = df_inventory.copy()
                             
@@ -254,15 +329,14 @@ if check_password():
 아래 제공된 실재고 데이터(CSV)만을 기반으로 사실에 입각하여 답변해.
 질문과 관련된 품목의 [품명], [규격/적요], [대원_실재고수량], [창고_실재고수량], [공급가액] 정보를 깔끔한 표(Markdown Table) 형식으로 정리해줘.
 절대 없는 수량이나 품목을 지어내지 말고, 데이터에 없으면 '해당 조건에 맞는 실재고가 확인되지 않습니다'라고 명확히 안내해.
-
 [업데이트 일시]: {update_datetime}
+
 [창고 연동 실재고 데이터]
 {context_csv}
 
 [질문]
 {user_question}"""
-
-                            # 구글 REST API 호출 페이로드 (대괄호 짝 완전 수복 완료)
+                            # 2. [무한 대기 박멸] 구글 REST API 다이렉트 호출 (타임아웃 10초 강제)
                             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={CLEAN_API_KEY}"
                             headers = {"Content-Type": "application/json"}
                             payload = {
@@ -270,10 +344,8 @@ if check_password():
                                     {"parts": [{"text": prompt}]}
                                 ]
                             }
-
                             resp = requests.post(api_url, headers=headers, json=payload, timeout=10)
                             status_placeholder.empty()
-
                             if resp.status_code == 200:
                                 resp_data = resp.json()
                                 candidates = resp_data.get("candidates", [])
@@ -285,12 +357,10 @@ if check_password():
                                     
                                 st.markdown(answer_text)
                                 st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
-
                             elif resp.status_code == 429:
                                 err_msg = "⚠️ 현재 구글 API 하루 무료 사용 한도(20회)를 모두 소진했습니다. 잠시 후 시도하거나 새 키를 등록해 주세요."
                                 st.warning(err_msg)
                                 st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-
                             else:
                                 err_json = resp.text
                                 err_msg = f"❌ API 응답 오류 (상태코드 {resp.status_code}): {err_json}"
@@ -302,7 +372,6 @@ if check_password():
                             err_msg = "⚠️ 구글 서버 응답 시간(10초)이 초과되었습니다. 다시 한 번 질문하기를 눌러주세요."
                             st.warning(err_msg)
                             st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
-
                         except Exception as e:
                             status_placeholder.empty()
                             err_msg = f"❌ AI 호출 중 오류 발생: {e}"

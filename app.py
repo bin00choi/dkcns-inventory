@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-# import google.generativeai as genai  # (주석 처리)
 from datetime import datetime
 import pytz
 import requests
@@ -214,9 +213,6 @@ if check_password():
             if not update_datetime.endswith("KST") and update_datetime != "알 수 없음":
                 update_datetime = f"{update_datetime} KST"
         
-        RAW_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-        CLEAN_API_KEY = RAW_API_KEY.strip() if RAW_API_KEY else ""
-        
         # ERP 미등록 및 WBS 미기안 항목 빈칸("") 치환
         unregistered_keywords = ["nan", "None", "-", "미등록", "ERP미등록", "ERP 미등록", "미기안", "WBS미기안", "WBS 미기안"]
         
@@ -255,7 +251,6 @@ if check_password():
         # -------------------------------------------------------------------------
         # 📋 컬럼명 유연 매칭 및 "입고일", "보유개월수" 동적 이름 지정
         # -------------------------------------------------------------------------
-        # (스프레드시트의 줄바꿈 컬럼명 "보유\n\n개월수" 및 "보유\n개월수" 지원 추가)
         target_mappings = {
             "대분류": ["대분류"],
             "중분류": ["중분류"],
@@ -385,46 +380,6 @@ if check_password():
             st.dataframe(df_ordered, use_container_width=True, hide_index=True)
 
         with tab2:
-            st.subheader("💬 실재고 관련 궁금한 점을 편하게 질문하세요")
-            st.caption("💡 32G 메모리 재고, 거래처별 재고 등 실재고 수량을 자연어로 질의할 수 있습니다.")
-            
-            col_input, col_btn = st.columns((5, 1))
-            with col_input:
-                user_question = st.text_input(
-                    "질문 입력",
-                    placeholder="예: '32기가 메모리 재고 있어?', '하루제스트 재고 목록?'",
-                    label_visibility="collapsed",
-                    key="chat_input_text"
-                )
-            with col_btn:
-                ask_clicked = st.button("질문하기", use_container_width=True, type="primary")
-            
-            if ask_clicked:
-                # 챗봇 클릭 시 "개발중 입니다." 알림 표출 (요청 반영)
-                st.info("개발중 입니다.")
-                
-            # -----------------------------------------------------------------
-            # 🤖 AI 챗봇 호출 관련 로직 전체 주석 처리 (비활성화)
-            # -----------------------------------------------------------------
-            # if "chat_messages" not in st.session_state:
-            #     st.session_state["chat_messages"] = []
-            # for msg in st.session_state["chat_messages"]:
-            #     with st.chat_message(msg["role"]):
-            #         st.markdown(msg["content"])
-            #
-            # if ask_clicked and user_question.strip():
-            #     st.session_state["chat_messages"].append({"role": "user", "content": user_question})
-            #     with st.chat_message("user"):
-            #         st.markdown(user_question)
-            #         
-            #     with st.chat_message("assistant"):
-            #         if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
-            #             warn_msg = "⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요."
-            #             st.warning(warn_msg)
-            #             st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
-            #         else:
-            #             status_placeholder = st.empty()
-            #             status_placeholder.info("🔍 실재고 데이터를 검색하고 있습니다...")
-            #             
-            #             try:
-                            # (중략 - AI 연동 로직 전체 비활성화 처리됨)
+            # 탭 메뉴를 클릭하자마자 즉시 "개발중 입니다." 팝업(Toast)과 알림창(Info) 표출 (요청 반영)
+            st.toast("💬 개발중 입니다.", icon="⚠️")
+            st.info("💬 현재 이 메뉴는 개발 중입니다. 빠른 시일 내에 찾아뵙겠습니다!")

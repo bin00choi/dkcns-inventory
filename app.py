@@ -118,13 +118,6 @@ if check_password():
         
         spreadsheet = client.open("dkcns_inventory")
         
-        # 구글시트 실제 최종 변경일시 획득
-        sheet_updated_raw = "알 수 없음"
-        try:
-            sheet_updated_raw = spreadsheet.updated
-        except Exception:
-            pass
-            
         # [안전 장치 추가] get_all_records()의 빈 헤더 중복 에러 및 타입에러를 원천 방지하는 안전 함수
         def safe_get_dataframe(worksheet):
             all_values = worksheet.get_all_values()
@@ -156,22 +149,35 @@ if check_password():
                 
             return df
             
-        # 안전한 함수를 이용하여 실시간재고현황 로드
+        # 1. 안전한 함수를 이용하여 실시간재고현황 로드
         sheet_realtime = spreadsheet.worksheet("실시간재고현황")
         df_inv = safe_get_dataframe(sheet_realtime)
         
-        # 안전한 함수를 이용하여 재고검증요약 로드
+        # 2. 안전한 함수를 이용하여 재고검증요약 로드
         sheet_summary = spreadsheet.worksheet("재고검증요약")
         df_sum = safe_get_dataframe(sheet_summary)
         
-        return df_inv, df_sum, sheet_updated_raw
+        # 3. 업데이트 탭 연동하여 업로드 실시간 취득 (A1:B1에서 B1 값 획득)
+        update_datetime_val = "알 수 없음"
+        try:
+            sheet_update = spreadsheet.worksheet("업데이트")
+            update_data = sheet_update.get_all_values()
+            if len(update_data) > 0 and len(update_data[0]) > 1:
+                update_datetime_val = str(update_data[0][1]).strip()
+        except Exception:
+            try:
+                update_datetime_val = spreadsheet.updated
+            except Exception:
+                pass
+        
+        return df_inv, df_sum, update_datetime_val
 
     # -------------------------------------------------------------------------
     # 🛠️ 데이터 로드 및 초기 정제
     # -------------------------------------------------------------------------
     df_inventory = pd.DataFrame()
     df_summary = pd.DataFrame()
-    sheet_updated_time = ""
+    update_datetime_raw = ""
     data_loaded = False
     
     # 플레이스홀더를 사용해 로딩 안내문을 임시 생성
@@ -179,7 +185,7 @@ if check_password():
     status_holder.info("🔑 인증이 완료되었습니다. 데이터를 불러오는 중입니다...")
     
     try:
-        df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
+        df_inventory, df_summary, update_datetime_raw = load_cloud_sheet_data()
         data_loaded = True
         status_holder.empty()
     except Exception as general_err:
@@ -188,13 +194,19 @@ if check_password():
 
     # 데이터가 정상 로드되었을 때만 후속 로직 진행
     if data_loaded:
-        # 구글시트 업데이트 시간 KST 포맷팅
+        # 구글시트 업데이트 시간 포맷팅
         try:
-            parsed_time = pd.to_datetime(sheet_updated_time).tz_convert('Asia/Seoul')
+            parsed_time = pd.to_datetime(update_datetime_raw)
+            if parsed_time.tzinfo is None:
+                # 타임존이 없을 경우 서울 KST로 변환
+                parsed_time = pytz.timezone('Asia/Seoul').localize(parsed_time)
+            else:
+                parsed_time = parsed_time.tz_convert('Asia/Seoul')
             update_datetime = parsed_time.strftime('%Y-%m-%d %H:%M:%S KST')
         except Exception:
-            kst_tz = pytz.timezone('Asia/Seoul')
-            update_datetime = datetime.now(kst_tz).strftime('%Y-%m-%d %H:%M:%S KST')
+            update_datetime = str(update_datetime_raw)
+            if not update_datetime.endswith("KST") and update_datetime != "알 수 없음":
+                update_datetime = f"{update_datetime} KST"
         
         RAW_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
         CLEAN_API_KEY = RAW_API_KEY.strip() if RAW_API_KEY else ""
@@ -235,9 +247,12 @@ if check_password():
         ).drop(columns=["_sort_weight", "_cat1", "_cat2", "_cat3"]).reset_index(drop=True)
 
         # -------------------------------------------------------------------------
-        # 📋 컬럼명 유연 매칭 및 "입고일(Invoice)" 동적 이름 지정
+        # 📋 컬럼명 유연 매칭 및 "입고일", "보유개월수" 동적 이름 지정
         # -------------------------------------------------------------------------
         target_mappings = {
+            "대분류": ["대분류"],
+            "중분류": ["중분류"],
+            "소분류": ["소분류"],
             "대원_업체상품코드": ["대원_업체상품코드"],
             "대원_상품명": ["대원_상품명"],
             "대원_현재재고": ["대원_현재재고", "대원_실재고수량"],
@@ -247,8 +262,8 @@ if check_password():
             "거래처명": ["거래처명", "ERP_거래처명"],
             "ERP_재고수량": ["ERP_재고수량", "창고_실재고수량"],
             "입고단가": ["입고단가", "공급가액"],
-            "입고일(Invoice)": ["입고일(Invoice)", "입고일"],
-            "보유개월수": ["보유개월수"]
+            "입고일": ["입고일(Invoice)", "입고일"],
+            "보유개월수": ["보유개월수", "보유 개월수"]
         }
         rename_dict = {}
         for target_name, alternatives in target_mappings.items():
@@ -315,28 +330,25 @@ if check_password():
                     search_mask = search_mask | df_filtered[col].astype(str).str.contains(search_query.strip(), case=False, na=False)
                 df_filtered = df_filtered[search_mask]
 
-            # 4. 순번 넘버링 추가 및 요청된 11개 핵심 컬럼 고정 순서 정렬
+            # 4. '순번' 컬럼을 생성하고, 오직 지정된 15개의 컬럼만 최종 화면에 표시 (이외 품목 비표시)
             fixed_columns = [
+                "대분류", "중분류", "소분류", 
                 "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", 
                 "ERP_품명", "적요(규격)", "거래처명", "ERP_재고수량", 
-                "입고단가", "입고일(Invoice)", "보유개월수"
+                "입고단가", "입고일", "보유개월수"
             ]
             
-            # 실제 존재 컬럼 및 부재 시 보완
+            # 없는 컬럼 대비 보완
             for col in fixed_columns:
                 if col not in df_filtered.columns:
                     df_filtered[col] = ""
-            
-            # 나머지 추가 컬럼 필터링
-            remaining_cols = [col for col in df_filtered.columns if col not in fixed_columns]
-            
-            # 최종 정렬 컬럼 세트 생성
-            df_ordered = df_filtered[fixed_columns + remaining_cols].copy()
+                    
+            # 지정된 열 이외에는 표시하지 않도록 정확하게 슬라이싱 (비고, 상태 등 완전 비표시)
+            df_ordered = df_filtered[fixed_columns].copy()
             
             # -------------------------------------------------------------------------
-            # 💲 데이터 정밀 포맷팅 (입고단가 콤마 추가, 입고일(Invoice) yyyy-mm-dd 강제)
+            # 💲 데이터 정밀 포맷팅 (입고단가 콤마 추가, 입고일 YYYY-MM-DD 강제)
             # -------------------------------------------------------------------------
-            # 입고단가 콤마(,) 포맷팅 함수
             def format_price(val):
                 if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
                     return ""
@@ -346,7 +358,6 @@ if check_password():
                 except ValueError:
                     return val
 
-            # 입고일 YYYY-MM-DD 형식 포맷팅 함수
             def format_date(val):
                 if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
                     return ""
@@ -357,9 +368,9 @@ if check_password():
                     return str(val).split(" ")[0].strip()
 
             df_ordered["입고단가"] = df_ordered["입고단가"].apply(format_price)
-            df_ordered["입고일(Invoice)"] = df_ordered["입고일(Invoice)"].apply(format_date)
+            df_ordered["입고일"] = df_ordered["입고일"].apply(format_date)
             
-            # '순번' 컬럼을 가장 맨 앞에 생성 및 삽입
+            # '순번' 컬럼을 가장 맨 앞에 1부터 넘버링하여 삽입
             df_ordered = df_ordered.reset_index(drop=True)
             df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
             

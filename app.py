@@ -42,19 +42,19 @@ st.markdown("""
 @media (max-width: 640px) {
     /* 모바일 전체 화면 여백 최적화 (여백을 줄여 표가 더 넓게 보이도록 처리) */
     .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 1rem !important;
-        padding-left: 0.6rem !important;
-        padding-right: 0.6rem !important;
+        padding-top: 0.8rem !important;
+        padding-bottom: 0.8rem !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
     }
     
-    /* 모바일 타이틀 크기 최적화 */
+    /* 모바일 타이틀 크기 가독성 있게 증가 */
     .mobile-title h1 {
-        font-size: 1.6rem !important;
+        font-size: 2.0rem !important;
     }
     .mobile-title span {
-        font-size: 12px !important;
-        margin-left: 6px !important;
+        font-size: 14px !important;
+        margin-left: 8px !important;
     }
     
     /* 대/중/소분류 다중 필터 한 줄 배치 고도화 (글씨 뭉개짐 방지) */
@@ -335,16 +335,19 @@ if check_password():
         # -------------------------------------------------------------------------
         # 🖥️ 메인 UI 화면 구성 (모바일 반응형 최적화)
         # -------------------------------------------------------------------------
-        # (mobile-title 클래스 부여를 통한 CSS 최적화 매칭)
+        # 1. 🔍 재고 조회 + by CHOI (한줄 고정 배치)
         st.markdown("""
-            <div class="mobile-title" style="display: flex; align-items: baseline; margin-bottom: 5px;">
-                <h1 style="margin: 0; display: inline-block; font-weight: bold;">🔍 재고 조회</h1>
+            <div class="mobile-title" style="display: flex; align-items: baseline; margin-top: 10px; margin-bottom: 2px;">
+                <h1 style="margin: 0; display: inline-block; font-size: 2.3rem; font-weight: bold; color: #111111;">🔍 재고 조회</h1>
                 <span style="font-size: 15px; color: #888888; margin-left: 12px; font-weight: normal;">by CHOI</span>
             </div>
         """, unsafe_allow_html=True)
         
-        st.caption(f"마지막 업데이트: {update_datetime}")
-        st.markdown("---")
+        # 2. 마지막 업데이트 시간 (상하 마진을 최소로 줄임)
+        st.markdown(f"<p style='margin: 0 0 10px 0; font-size: 14px; color: #666;'>마지막 업데이트: {update_datetime}</p>", unsafe_allow_html=True)
+        
+        # 3. 얇은 커스텀 디자인 보더선 (기존의 두껍고 여백 큰 markdown('---') 완전 제거하여 여백 60% 축소)
+        st.markdown("<hr style='margin: 4px 0 14px 0; border: none; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["📋 실시간 재고 리스트", "💬 AI 챗봇에게 물어보기"])
         
@@ -445,5 +448,6 @@ if check_password():
             st.dataframe(df_ordered, use_container_width=True, hide_index=True)
 
         with tab2:
+            # 탭 메뉴를 클릭하자마자 즉시 "개발중 입니다." 팝업(Toast)과 알림창(Info) 표출 (요청 반영)
             st.toast("💬 개발중 입니다.", icon="⚠️")
             st.info("💬 현재 이 메뉴는 개발 중입니다. 빠른 시일 내에 찾아뵙겠습니다!")

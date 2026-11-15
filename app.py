@@ -279,7 +279,8 @@ if check_password():
         # -------------------------------------------------------------------------
         # 🖥️ 메인 UI 화면 구성
         # -------------------------------------------------------------------------
-        st.title("🔍 재고 조회")
+        # (타이틀 옆에 작게 'by CHOI' 저작 표시가 붙도록 HTML 마크다운 처리)
+        st.markdown("<h1 style='display: inline;'>🔍 재고 조회</h1> <span style='font-size: 15px; color: #888888; margin-left: 10px; font-weight: normal; vertical-align: middle;'>by CHOI</span>", unsafe_allow_html=True)
         st.caption(f"마지막 업데이트: {update_datetime}")
         st.markdown("---")
         

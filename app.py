@@ -10,7 +10,7 @@ import json
 # Page 기본 설정
 st.set_page_config(page_title="재고 조회", layout="wide")
 
-# CSS 스타일 적용 (모바일 1라인 강제 유지, 우측 상단 기본 'Running...' 숨김, 스크롤바 가시성 증대)
+# CSS 스타일 적용 (모바일 최적화 및 레이아웃 가독성 강화)
 st.markdown("""
 <style>
 /* 1. 우측 상단 Running... 기본 위젯만 깔끔하게 숨김 */
@@ -37,20 +37,40 @@ st.markdown("""
 ::-webkit-scrollbar-track {
     background: #f1f1f1 !important;
 }
-/* 3. 모바일 화면에서 대/중/소분류 다중 필터 한 줄 강제 배치 */
+
+/* 3. 모바일(640px 이하) 전용 반응형 레이아웃 및 폰트 축소 */
 @media (max-width: 640px) {
+    /* 모바일 전체 화면 여백 최적화 (여백을 줄여 표가 더 넓게 보이도록 처리) */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+        padding-left: 0.6rem !important;
+        padding-right: 0.6rem !important;
+    }
+    
+    /* 모바일 타이틀 크기 최적화 */
+    .mobile-title h1 {
+        font-size: 1.6rem !important;
+    }
+    .mobile-title span {
+        font-size: 12px !important;
+        margin-left: 6px !important;
+    }
+    
+    /* 대/중/소분류 다중 필터 한 줄 배치 고도화 (글씨 뭉개짐 방지) */
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 6px !important;
+        gap: 4px !important;
     }
     div[data-testid="stHorizontalBlock"] > div {
         min-width: 0 !important;
         flex: 1 1 0% !important;
     }
-    /* 셀렉트박스 폰트 및 패딩 최적화 */
+    /* 모바일 셀렉트박스 텍스트 가독성 확보 */
     div[data-baseweb="select"] {
         font-size: 11px !important;
+        padding: 1px !important;
     }
 }
 </style>
@@ -163,15 +183,15 @@ if check_password():
         sheet_summary = spreadsheet.worksheet("재고검증요약")
         df_sum = safe_get_dataframe(sheet_summary)
         
-        # 3. 예약 시트 데이터 로드 (★신규 연동)
+        # 3. 예약 시트 데이터 로드
         df_reserve = pd.DataFrame()
         try:
             sheet_reserve = spreadsheet.worksheet("예약")
             df_reserve = safe_get_dataframe(sheet_reserve)
         except Exception:
-            print("⚠️ '예약' 시트를 구글 스프레드시트에서 찾을 수 없습니다.")
+            pass
         
-        # 4. 업데이트 탭 연동하여 업로드 실시간 취득 (A1:B1에서 B1 값 획득)
+        # 4. 업데이트 탭 연동하여 업로드 실시간 취득
         update_datetime_val = "알 수 없음"
         try:
             sheet_update = spreadsheet.worksheet("업데이트")
@@ -286,12 +306,11 @@ if check_password():
         df_inventory = df_inventory.rename(columns=rename_dict)
 
         # -------------------------------------------------------------------------
-        # 🛡️ 예약재고 및 가용재고 실시간 연산 적용 (★신규 추가)
+        # 🛡️ 예약재고 및 가용재고 실시간 연산 적용
         # -------------------------------------------------------------------------
-        df_inventory["예약재고"] = 0  # 초기값 생성
+        df_inventory["예약재고"] = 0
         
         if df_reserve_raw is not None and not df_reserve_raw.empty:
-            # 예약 시트의 컬럼명 동적 매핑
             col_reserve_item = None
             col_reserve_qty = None
             for col in df_reserve_raw.columns:
@@ -301,27 +320,25 @@ if check_password():
                     col_reserve_qty = col
             
             if col_reserve_item and col_reserve_qty:
-                # 예약 데이터 내 수치화 적용 및 품목별 중복 합산 요약
                 df_reserve_raw[col_reserve_qty] = pd.to_numeric(df_reserve_raw[col_reserve_qty], errors='coerce').fillna(0).astype(int)
                 reserve_summary = df_reserve_raw.groupby(col_reserve_item)[col_reserve_qty].sum().to_dict()
                 
-                # 예약재고 반영 및 가용재고 감산 연산
                 for idx, row in df_inventory.iterrows():
                     erp_item_name = str(row.get("ERP_품명", "")).strip()
                     if erp_item_name in reserve_summary:
                         res_qty = int(reserve_summary[erp_item_name])
                         df_inventory.at[idx, "예약재고"] = res_qty
                         
-                        # 가용재고 수치화 후 차감 (0 이하가 될 경우 0 처리)
                         curr_avail = int(pd.to_numeric(row.get("대원_가용재고", 0), errors="coerce"))
                         df_inventory.at[idx, "대원_가용재고"] = max(0, curr_avail - res_qty)
 
         # -------------------------------------------------------------------------
-        # 🖥️ 메인 UI 화면 구성
+        # 🖥️ 메인 UI 화면 구성 (모바일 반응형 최적화)
         # -------------------------------------------------------------------------
+        # (mobile-title 클래스 부여를 통한 CSS 최적화 매칭)
         st.markdown("""
-            <div style="display: flex; align-items: baseline; margin-bottom: 5px;">
-                <h1 style="margin: 0; display: inline-block;">🔍 재고 조회</h1>
+            <div class="mobile-title" style="display: flex; align-items: baseline; margin-bottom: 5px;">
+                <h1 style="margin: 0; display: inline-block; font-weight: bold;">🔍 재고 조회</h1>
                 <span style="font-size: 15px; color: #888888; margin-left: 12px; font-weight: normal;">by CHOI</span>
             </div>
         """, unsafe_allow_html=True)
@@ -332,10 +349,10 @@ if check_password():
         tab1, tab2 = st.tabs(["📋 실시간 재고 리스트", "💬 AI 챗봇에게 물어보기"])
         
         with tab1:
-            # 1. 원래 존재하던 통합 검색창 복구
+            # 1. 통합 검색창
             search_query = st.text_input("🔍 품목명 / 코드 등 검색", "", placeholder="원하시는 검색어를 입력하시면 목록이 필터링됩니다.")
             
-            # 2. 대분류 / 중분류 / 소분류 필터 가로 배치
+            # 2. 대분류 / 중분류 / 소분류 필터 가로 배치 (모바일에서 한줄 가로 배치 유지됨)
             f_col1, f_col2, f_col3 = st.columns(3)
             
             with f_col1:
@@ -379,7 +396,6 @@ if check_password():
                 df_filtered = df_filtered[search_mask]
 
             # 4. '순번' 컬럼을 생성하고, 오직 지정된 16개의 컬럼만 최종 화면에 표시 (이외 품목 비표시)
-            # 대원_가용재고 옆에 '예약재고'가 오도록 컬럼 세트 배치 완료
             fixed_columns = [
                 "대분류", "중분류", "소분류", 
                 "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", "예약재고", 
@@ -392,7 +408,6 @@ if check_password():
                 if col not in df_filtered.columns:
                     df_filtered[col] = ""
                     
-            # 지정된 열 이외에는 표시하지 않도록 정확하게 슬라이싱 (비고, 상태 등 완전 비표시)
             df_ordered = df_filtered[fixed_columns].copy()
             
             # -------------------------------------------------------------------------
@@ -423,10 +438,12 @@ if check_password():
             df_ordered = df_ordered.reset_index(drop=True)
             df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
             
+            # 💡 [모바일 UX 강화] 가로 스크롤 사용법 팁 배너 추가
+            st.caption("💡 **모바일 팁**: 표를 **좌우로 밀어서(가로 스크롤)** 숨겨진 전체 상세 열 정보를 편리하게 확인하실 수 있습니다.")
+            
             # 최종 데이터 프레임 표출
             st.dataframe(df_ordered, use_container_width=True, hide_index=True)
 
         with tab2:
-            # 탭 메뉴를 클릭하자마자 즉시 "개발중 입니다." 팝업(Toast)과 알림창(Info) 표출 (요청 반영)
             st.toast("💬 개발중 입니다.", icon="⚠️")
             st.info("💬 현재 이 메뉴는 개발 중입니다. 빠른 시일 내에 찾아뵙겠습니다!")

@@ -21,7 +21,6 @@ st.markdown("""
     width: 0px !important;
     overflow: hidden;
 }
-
 /* 2. 가로, 세로 스크롤바 선명하게 강화 */
 ::-webkit-scrollbar {
     width: 12px !important;
@@ -39,7 +38,6 @@ st.markdown("""
 ::-webkit-scrollbar-track {
     background: #f1f1f1 !important;
 }
-
 /* 3. 모바일 화면에서 대/중/소분류 다중 필터 한 줄 강제 배치 */
 @media (max-width: 640px) {
     div[data-testid="stHorizontalBlock"] {
@@ -66,10 +64,9 @@ def check_password():
     kst = pytz.timezone('Asia/Seoul')
     correct_password = datetime.now(kst).strftime('%Y%m%d')
     
-    # 패스워드가 이미 맞게 통과된 상태라면 로그인창을 건너뜀
+    # 패스워드가 이미 맞게 통과된 상태라면 로그인창을 건너뜜
     if st.session_state.get("password_correct", False):
         return True
-
     def password_entered():
         user_input = st.session_state.get("password_input", "")
         if user_input == correct_password:
@@ -78,7 +75,6 @@ def check_password():
                 del st.session_state["password_input"]
         else:
             st.session_state["password_correct"] = False
-
     st.markdown("### 🔑 패스워드 입력")
     st.text_input(
         "비밀번호를 입력하세요",
@@ -127,13 +123,43 @@ if check_password():
         except Exception:
             pass
             
+        # [안전 장치 추가] get_all_records()의 빈 헤더 중복 에러를 원천 우회하는 헬퍼 함수
+        def safe_get_dataframe(worksheet):
+            all_values = worksheet.get_all_values()
+            if not all_values:
+                return pd.DataFrame()
+            
+            headers = [str(h).strip() for h in all_values[0]]
+            data_rows = all_values[1:]
+            
+            # 1단계: 임시 DataFrame 생성
+            df = pd.DataFrame(data_rows)
+            
+            # 2단계: 헤더 길이와 데이터 열 길이 맞추기
+            if len(headers) < df.shape[1]:
+                headers += [""] * (df.shape[1] - len(headers))
+            elif len(headers) > df.shape[1]:
+                headers = headers[:df.shape[1]]
+                
+            df.columns = headers
+            
+            # 3단계: 빈 컬럼 헤더명('') 및 Unnamed 컬럼을 판다스 내에서 완벽하게 필터링 삭제
+            df = df.loc[:, df.columns.astype(str).str.strip() != '']
+            df = df.loc[:, ~df.columns.astype(str).str.contains('^Unnamed:')]
+            
+            # 4단계: 기존 get_all_records()처럼 숫자값 자동 감지 및 타입 추론 보정
+            for col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+                
+            return df
+            
+        # 안전한 함수를 이용하여 실시간재고현황 로드
         sheet_realtime = spreadsheet.worksheet("실시간재고현황")
-        data_realtime = sheet_realtime.get_all_records()
-        df_inv = pd.DataFrame(data_realtime)
+        df_inv = safe_get_dataframe(sheet_realtime)
         
+        # 안전한 함수를 이용하여 재고검증요약 로드
         sheet_summary = spreadsheet.worksheet("재고검증요약")
-        data_summary = sheet_summary.get_all_records()
-        df_sum = pd.DataFrame(data_summary)
+        df_sum = safe_get_dataframe(sheet_summary)
         
         return df_inv, df_sum, sheet_updated_raw
 
@@ -170,7 +196,7 @@ if check_password():
         
         RAW_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
         CLEAN_API_KEY = RAW_API_KEY.strip() if RAW_API_KEY else ""
-
+        
         # ERP 미등록 및 WBS 미기안 항목 빈칸("") 치환
         unregistered_keywords = ["nan", "None", "-", "미등록", "ERP미등록", "ERP 미등록", "미기안", "WBS미기안", "WBS 미기안"]
         
@@ -222,7 +248,6 @@ if check_password():
             "입고일(Invoice)": ["입고일(Invoice)", "입고일"],
             "보유개월수": ["보유개월수"]
         }
-
         rename_dict = {}
         for target_name, alternatives in target_mappings.items():
             for alt in alternatives:
@@ -396,6 +421,7 @@ if check_password():
 아래 제공된 실재고 데이터(CSV)만을 기반으로 사실에 입각하여 답변해.
 질문과 관련된 품목의 [품명], [규격/적요], [대원_실재고수량], [창고_실재고수량], [공급가액] 정보를 깔끔한 표(Markdown Table) 형식으로 정리해줘.
 절대 없는 수량이나 품목을 지어내지 말고, 데이터에 없으면 '해당 조건에 맞는 실재고가 확인되지 않습니다'라고 명확히 안내해.
+
 [업데이트 일시]: {update_datetime}
 
 [창고 연동 실재고 데이터]
@@ -403,6 +429,7 @@ if check_password():
 
 [질문]
 {user_question}"""
+
                             # 2. [무한 대기 박멸] 구글 REST API 다이렉트 호출 (타임아웃 10초 강제)
                             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={CLEAN_API_KEY}"
                             headers = {"Content-Type": "application/json"}

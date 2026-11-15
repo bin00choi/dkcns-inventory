@@ -104,7 +104,7 @@ def check_password():
     # 로그인 타이틀과 비밀번호 폼 간의 공간 확보를 위한 컨테이너 구성
     st.markdown("<div style='margin-top: 20px;'>### 🔑 패스워드 입력</div>", unsafe_allow_html=True)
     st.text_input(
-        "비밀번호를 입력하세요 (오늘 날짜 YYYYMMDD)",
+        "비밀번호를 입력하세요",
         type="password",
         on_change=password_entered,
         key="password_input"
@@ -377,4 +377,63 @@ if check_password():
                 
             with f_col3:
                 cat3_list = sorted([x for x in df_step2["소분류"].unique().tolist() if x != ""]) if "소분류" in df_step2.columns else []
+                if "소분류" in df_step2.columns and "" in df_step2["소분류"].values:
+                    cat3_list.append("미분류(빈칸)")
+                sel_cat3 = st.multiselect("소분류", cat3_list, placeholder="전체")
                 
+            df_filtered = df_step2.copy()
+            if "소분류" in df_filtered.columns and sel_cat3:
+                actual_cat3 = ["" if x == "미분류(빈칸)" else x for x in sel_cat3]
+                df_filtered = df_filtered[df_filtered["소분류"].isin(actual_cat3)]
+                
+            # 3. 통합 검색창 필터링
+            if search_query.strip():
+                search_mask = pd.Series(False, index=df_filtered.index)
+                for col in df_filtered.columns:
+                    search_mask = search_mask | df_filtered[col].astype(str).str.contains(search_query.strip(), case=False, na=False)
+                df_filtered = df_filtered[search_mask]
+
+            # 4. 순번 및 16개 핵심 컬럼만 표시
+            fixed_columns = [
+                "대분류", "중분류", "소분류", 
+                "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", "예약재고", 
+                "ERP_품명", "적요(규격)", "거래처명", "ERP_재고수량", 
+                "입고단가", "입고일", "보유개월수"
+            ]
+            
+            for col in fixed_columns:
+                if col not in df_filtered.columns:
+                    df_filtered[col] = ""
+                    
+            df_ordered = df_filtered[fixed_columns].copy()
+            
+            # 포맷팅
+            def format_price(val):
+                if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
+                    return ""
+                try:
+                    num = float(str(val).replace(",", "").strip())
+                    return f"{int(num):,}"
+                except ValueError:
+                    return val
+
+            def format_date(val):
+                if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
+                    return ""
+                try:
+                    dt_parsed = pd.to_datetime(val)
+                    return dt_parsed.strftime('%Y-%m-%d')
+                except Exception:
+                    return str(val).split(" ")[0].strip()
+
+            df_ordered["입고단가"] = df_ordered["입고단가"].apply(format_price)
+            df_ordered["입고일"] = df_ordered["입고일"].apply(format_date)
+            
+            df_ordered = df_ordered.reset_index(drop=True)
+            df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
+            
+            st.caption("💡 **모바일 팁**: 표를 **좌우로 밀어서(가로 스크롤)** 숨겨진 전체 상세 열 정보를 편리하게 확인하실 수 있습니다.")
+            st.dataframe(df_ordered, use_container_width=True, hide_index=True)
+
+        with tab2:
+            st.info("💬 현재 이 메뉴는 개발 중입니다. 빠른 시일 내에 찾아뵙겠습니다!")

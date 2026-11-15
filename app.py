@@ -40,7 +40,7 @@ st.markdown("""
 
 /* 3. 모바일(640px 이하) 전용 반응형 레이아웃 및 폰트 축소 */
 @media (max-width: 640px) {
-    /* 모바일 전체 화면 여백 최적화 (여백을 줄여 표가 더 넓게 보이도록 처리) */
+    /* 모바일 전체 화면 여백 최적화 */
     .block-container {
         padding-top: 0.8rem !important;
         padding-bottom: 0.8rem !important;
@@ -48,7 +48,7 @@ st.markdown("""
         padding-right: 0.5rem !important;
     }
     
-    /* 모바일 타이틀 크기 가독성 있게 증가 */
+    /* 모바일 타이틀 크기 가독성 확보 */
     .mobile-title h1 {
         font-size: 2.0rem !important;
     }
@@ -57,7 +57,7 @@ st.markdown("""
         margin-left: 8px !important;
     }
     
-    /* 대/중/소분류 다중 필터 한 줄 배치 고도화 (글씨 뭉개짐 방지) */
+    /* 대/중/소분류 다중 필터 한 줄 배치 고도화 */
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -83,7 +83,6 @@ def check_password():
     kst = pytz.timezone('Asia/Seoul')
     correct_password = datetime.now(kst).strftime('%Y%m%d')
     
-    # 패스워드가 이미 맞게 통과된 상태라면 로그인창을 건너뜜
     if st.session_state.get("password_correct", False):
         return True
         
@@ -108,7 +107,6 @@ def check_password():
         if not st.session_state["password_correct"]:
             st.error("비밀번호가 올바르지 않습니다. 관리자에게 문의해 주세요.")
         else:
-            # 패스워드가 올바를 경우 즉시 화면을 갱신하여 메인 앱 로딩으로 진입시킴
             st.rerun()
             
     return False
@@ -144,7 +142,7 @@ if check_password():
         except Exception:
             pass
             
-        # [안전 장치 추가] get_all_records()의 빈 헤더 중복 에러 및 타입에러를 원천 방지하는 안전 함수
+        # 안전한 데이터프레임 변환 함수
         def safe_get_dataframe(worksheet):
             all_values = worksheet.get_all_values()
             if not all_values:
@@ -162,11 +160,11 @@ if check_password():
                 
             df.columns = headers
             
-            # 공백 헤더명('') 및 Unnamed 컬럼을 완벽 제거
+            # 공백 헤더명('') 및 Unnamed 컬럼 제거
             df = df.loc[:, df.columns.astype(str).str.strip() != '']
             df = df.loc[:, ~df.columns.astype(str).str.contains('^Unnamed:')]
             
-            # 숫자 자동 형변환 진행
+            # 숫자 자동 형변환
             for col in df.columns:
                 try:
                     df[col] = pd.to_numeric(df[col], errors='raise')
@@ -175,11 +173,11 @@ if check_password():
                 
             return df
             
-        # 1. 안전한 함수를 이용하여 실시간재고현황 로드
+        # 1. 실시간재고현황 로드
         sheet_realtime = spreadsheet.worksheet("실시간재고현황")
         df_inv = safe_get_dataframe(sheet_realtime)
         
-        # 2. 안전한 함수를 이용하여 재고검증요약 로드
+        # 2. 재고검증요약 로드
         sheet_summary = spreadsheet.worksheet("재고검증요약")
         df_sum = safe_get_dataframe(sheet_summary)
         
@@ -191,7 +189,7 @@ if check_password():
         except Exception:
             pass
         
-        # 4. 업데이트 탭 연동하여 업로드 실시간 취득
+        # 4. 업데이트 탭 연동하여 업로드 일시 취득
         update_datetime_val = "알 수 없음"
         try:
             sheet_update = spreadsheet.worksheet("업데이트")
@@ -215,7 +213,6 @@ if check_password():
     update_datetime_raw = ""
     data_loaded = False
     
-    # 플레이스홀더를 사용해 로딩 안내문을 임시 생성
     status_holder = st.empty()
     status_holder.info("🔑 인증이 완료되었습니다. 데이터를 불러오는 중입니다...")
     
@@ -227,7 +224,6 @@ if check_password():
         status_holder.empty()
         st.error(f"❌ 데이터 로드 중 예상치 못한 치명적 에러가 발생했습니다: {general_err}")
 
-    # 데이터가 정상 로드되었을 때만 후속 로직 진행
     if data_loaded:
         # 구글시트 업데이트 시간 포맷팅
         try:
@@ -268,7 +264,7 @@ if check_password():
             
         df_inventory["_sort_weight"] = df_inventory.apply(get_sort_weight, axis=1)
         
-        # 대/중/소분류 빈칸도 정상 항목 내에서는 아래로 가도록 보조 정렬키 생성
+        # 대/중/소분류 보조 정렬키 생성
         df_inventory["_cat1"] = df_inventory["대분류"].apply(lambda x: "ㅎㅎㅎ" if x == "" else x)
         df_inventory["_cat2"] = df_inventory["중분류"].apply(lambda x: "ㅎㅎㅎ" if x == "" else x)
         df_inventory["_cat3"] = df_inventory["소분류"].apply(lambda x: "ㅎㅎㅎ" if x == "" else x)
@@ -277,9 +273,7 @@ if check_password():
             ascending=[True, True, True, True]
         ).drop(columns=["_sort_weight", "_cat1", "_cat2", "_cat3"]).reset_index(drop=True)
 
-        # -------------------------------------------------------------------------
-        # 📋 컬럼명 유연 매칭 및 "입고일", "보유개월수" 동적 이름 지정
-        # -------------------------------------------------------------------------
+        # 컬럼명 유연 매칭
         target_mappings = {
             "대분류": ["대분류"],
             "중분류": ["중분류"],
@@ -305,9 +299,7 @@ if check_password():
         
         df_inventory = df_inventory.rename(columns=rename_dict)
 
-        # -------------------------------------------------------------------------
-        # 🛡️ 예약재고 및 가용재고 실시간 연산 적용
-        # -------------------------------------------------------------------------
+        # 예약재고 반영 및 가용재고 차감
         df_inventory["예약재고"] = 0
         
         if df_reserve_raw is not None and not df_reserve_raw.empty:
@@ -333,9 +325,8 @@ if check_password():
                         df_inventory.at[idx, "대원_가용재고"] = max(0, curr_avail - res_qty)
 
         # -------------------------------------------------------------------------
-        # 🖥️ 메인 UI 화면 구성 (모바일 반응형 최적화)
+        # 🖥️ 메인 UI 화면 구성
         # -------------------------------------------------------------------------
-        # 1. 🔍 재고 조회 + by CHOI (한줄 고정 배치)
         st.markdown("""
             <div class="mobile-title" style="display: flex; align-items: baseline; margin-top: 10px; margin-bottom: 2px;">
                 <h1 style="margin: 0; display: inline-block; font-size: 2.3rem; font-weight: bold; color: #111111;">🔍 재고 조회</h1>
@@ -343,10 +334,7 @@ if check_password():
             </div>
         """, unsafe_allow_html=True)
         
-        # 2. 마지막 업데이트 시간 (상하 마진을 최소로 줄임)
         st.markdown(f"<p style='margin: 0 0 10px 0; font-size: 14px; color: #666;'>마지막 업데이트: {update_datetime}</p>", unsafe_allow_html=True)
-        
-        # 3. 얇은 커스텀 디자인 보더선 (기존의 두껍고 여백 큰 markdown('---') 완전 제거하여 여백 60% 축소)
         st.markdown("<hr style='margin: 4px 0 14px 0; border: none; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["📋 실시간 재고 리스트", "💬 AI 챗봇에게 물어보기"])
@@ -355,7 +343,7 @@ if check_password():
             # 1. 통합 검색창
             search_query = st.text_input("🔍 품목명 / 코드 등 검색", "", placeholder="원하시는 검색어를 입력하시면 목록이 필터링됩니다.")
             
-            # 2. 대분류 / 중분류 / 소분류 필터 가로 배치 (모바일에서 한줄 가로 배치 유지됨)
+            # 2. 대분류 / 중분류 / 소분류 필터
             f_col1, f_col2, f_col3 = st.columns(3)
             
             with f_col1:
@@ -391,14 +379,14 @@ if check_password():
                 actual_cat3 = ["" if x == "미분류(빈칸)" else x for x in sel_cat3]
                 df_filtered = df_filtered[df_filtered["소분류"].isin(actual_cat3)]
                 
-            # 3. 통합 검색창 입력 시 전체 컬럼 대상 필터링 수행
+            # 3. 통합 검색창 필터링
             if search_query.strip():
                 search_mask = pd.Series(False, index=df_filtered.index)
                 for col in df_filtered.columns:
                     search_mask = search_mask | df_filtered[col].astype(str).str.contains(search_query.strip(), case=False, na=False)
                 df_filtered = df_filtered[search_mask]
 
-            # 4. '순번' 컬럼을 생성하고, 오직 지정된 16개의 컬럼만 최종 화면에 표시 (이외 품목 비표시)
+            # 4. 순번 및 16개 핵심 컬럼만 표시
             fixed_columns = [
                 "대분류", "중분류", "소분류", 
                 "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", "예약재고", 
@@ -406,16 +394,13 @@ if check_password():
                 "입고단가", "입고일", "보유개월수"
             ]
             
-            # 없는 컬럼 대비 보완
             for col in fixed_columns:
                 if col not in df_filtered.columns:
                     df_filtered[col] = ""
                     
             df_ordered = df_filtered[fixed_columns].copy()
             
-            # -------------------------------------------------------------------------
-            # 💲 데이터 정밀 포맷팅 (입고단가 콤마 추가, 입고일 YYYY-MM-DD 강제)
-            # -------------------------------------------------------------------------
+            # 포맷팅
             def format_price(val):
                 if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
                     return ""
@@ -437,17 +422,12 @@ if check_password():
             df_ordered["입고단가"] = df_ordered["입고단가"].apply(format_price)
             df_ordered["입고일"] = df_ordered["입고일"].apply(format_date)
             
-            # '순번' 컬럼을 가장 맨 앞에 1부터 넘버링하여 삽입
             df_ordered = df_ordered.reset_index(drop=True)
             df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
             
-            # 💡 [모바일 UX 강화] 가로 스크롤 사용법 팁 배너 추가
             st.caption("💡 **모바일 팁**: 표를 **좌우로 밀어서(가로 스크롤)** 숨겨진 전체 상세 열 정보를 편리하게 확인하실 수 있습니다.")
-            
-            # 최종 데이터 프레임 표출
             st.dataframe(df_ordered, use_container_width=True, hide_index=True)
 
         with tab2:
-            # 탭 메뉴를 클릭하자마자 즉시 "개발중 입니다." 팝업(Toast)과 알림창(Info) 표출 (요청 반영)
-            st.toast("💬 개발중 입니다.", icon="⚠️")
+            # 탭 2 클릭 시에만 조용하게 안내 상자만 표출 (토스트 팝업 제거)
             st.info("💬 현재 이 메뉴는 개발 중입니다. 빠른 시일 내에 찾아뵙겠습니다!")

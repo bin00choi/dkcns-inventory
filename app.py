@@ -67,6 +67,7 @@ def check_password():
     # 패스워드가 이미 맞게 통과된 상태라면 로그인창을 건너뜜
     if st.session_state.get("password_correct", False):
         return True
+        
     def password_entered():
         user_input = st.session_state.get("password_input", "")
         if user_input == correct_password:
@@ -75,6 +76,7 @@ def check_password():
                 del st.session_state["password_input"]
         else:
             st.session_state["password_correct"] = False
+            
     st.markdown("### 🔑 패스워드 입력")
     st.text_input(
         "비밀번호를 입력하세요",
@@ -132,10 +134,8 @@ if check_password():
             headers = [str(h).strip() for h in all_values[0]]
             data_rows = all_values[1:]
             
-            # 1단계: 임시 DataFrame 생성
             df = pd.DataFrame(data_rows)
             
-            # 2단계: 헤더 길이와 데이터 열 길이 맞추기
             if len(headers) < df.shape[1]:
                 headers += [""] * (df.shape[1] - len(headers))
             elif len(headers) > df.shape[1]:
@@ -143,17 +143,15 @@ if check_password():
                 
             df.columns = headers
             
-            # 3단계: 빈 컬럼 헤더명('') 및 Unnamed 컬럼을 판다스 내에서 완벽하게 필터링 삭제
+            # 공백 헤더명('') 및 Unnamed 컬럼을 완벽 제거
             df = df.loc[:, df.columns.astype(str).str.strip() != '']
             df = df.loc[:, ~df.columns.astype(str).str.contains('^Unnamed:')]
             
-            # 4단계: 기존 get_all_records()처럼 숫자값 자동 감지 및 타입 추론 보정
-            # (구형/신형 모든 판다스 버전에 호환되도록 try-except 구조 사용)
+            # 숫자 자동 형변환 진행
             for col in df.columns:
                 try:
                     df[col] = pd.to_numeric(df[col], errors='raise')
                 except Exception:
-                    # 숫자가 아닌 문자열 텍스트 열인 경우 변환하지 않고 그대로 유지
                     pass
                 
             return df
@@ -183,7 +181,6 @@ if check_password():
     try:
         df_inventory, df_summary, sheet_updated_time = load_cloud_sheet_data()
         data_loaded = True
-        # 데이터가 성공적으로 정상 로드 완료되면 로딩 메시지를 완벽하게 비웁니다
         status_holder.empty()
     except Exception as general_err:
         status_holder.empty()
@@ -275,7 +272,7 @@ if check_password():
             # 1. 원래 존재하던 통합 검색창 복구
             search_query = st.text_input("🔍 품목명 / 코드 등 검색", "", placeholder="원하시는 검색어를 입력하시면 목록이 필터링됩니다.")
             
-            # 2. 대분류 / 중분류 / 소분류 필터 가로 배치 (모바일 1라인 강제 유지 CSS가 적용됨)
+            # 2. 대분류 / 중분류 / 소분류 필터 가로 배치
             f_col1, f_col2, f_col3 = st.columns(3)
             
             with f_col1:
@@ -396,4 +393,83 @@ if check_password():
                     st.markdown(user_question)
                     
                 with st.chat_message("assistant"):
-           
+                    if not CLEAN_API_KEY or CLEAN_API_KEY.startswith("AIzaSy...") or len(CLEAN_API_KEY) < 20:
+                        warn_msg = "⚠️ 챗봇 기능 활성화를 위해 Streamlit Secrets에 올바른 Gemini API Key를 등록해 주세요."
+                        st.warning(warn_msg)
+                        st.session_state["chat_messages"].append({"role": "assistant", "content": warn_msg})
+                    else:
+                        status_placeholder = st.empty()
+                        status_placeholder.info("🔍 실재고 데이터를 검색하고 있습니다...")
+                        
+                        try:
+                            # 1. 고속 판다스 벡터 검색으로 프롬프트 데이터 추출 (경량화)
+                            ai_context_cols = [c for c in df_inventory.columns if c not in ["_sort_weight", "_cat1", "_cat2", "_cat3"]]
+                            search_keywords = [w.strip().lower() for w in user_question.split() if len(w.strip()) >= 2]
+                            matched_df = df_inventory.copy()
+                            
+                            if search_keywords:
+                                mask = pd.Series(False, index=matched_df.index)
+                                for kw in search_keywords:
+                                    for col in ai_context_cols:
+                                        mask = mask | matched_df[col].astype(str).str.contains(kw, case=False, na=False)
+                                filtered_df = matched_df[mask]
+                                sample_df = filtered_df.head(30) if len(filtered_df) > 0 else matched_df.head(30)
+                            else:
+                                sample_df = matched_df.head(30)
+                                
+                            context_csv = sample_df[ai_context_cols].to_csv(index=False)
+                            
+                            prompt = f"""너는 실시간 재고 관리 시스템의 오더 검증 전문가야.
+아래 제공된 실재고 데이터(CSV)만을 기반으로 사실에 입각하여 답변해.
+질문과 관련된 품목의 [품명], [규격/적요], [대원_실재고수량], [창고_실재고수량], [공급가액] 정보를 깔끔한 표(Markdown Table) 형식으로 정리해줘.
+절대 없는 수량이나 품목을 지어내지 말고, 데이터에 없으면 '해당 조건에 맞는 실재고가 확인되지 않습니다'라고 명확히 안내해.
+
+[업데이트 일시]: {update_datetime}
+
+[창고 연동 실재고 데이터]
+{context_csv}
+
+[질문]
+{user_question}"""
+
+                            # 2. [무한 대기 박멸] 구글 REST API 다이렉트 호출 (타임아웃 10초 강제)
+                            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={CLEAN_API_KEY}"
+                            headers = {"Content-Type": "application/json"}
+                            payload = {
+                                "contents": [
+                                    {"parts": [{"text": prompt}]}
+                                ]
+                            }
+                            resp = requests.post(api_url, headers=headers, json=payload, timeout=10)
+                            status_placeholder.empty()
+                            if resp.status_code == 200:
+                                resp_data = resp.json()
+                                candidates = resp_data.get("candidates", [])
+                                if candidates and "content" in candidates[0]:
+                                    parts = candidates[0]["content"].get("parts", [])
+                                    answer_text = parts[0].get("text", "⚠️ 생성된 답변 내용이 비어 있습니다.")
+                                else:
+                                    answer_text = "⚠️ 조건에 일치하는 재고 품목을 찾을 수 없습니다."
+                                    
+                                st.markdown(answer_text)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": answer_text})
+                            elif resp.status_code == 429:
+                                err_msg = "⚠️ 현재 구글 API 하루 무료 사용 한도(20회)를 모두 소진했습니다. 잠시 후 시도하거나 새 키를 등록해 주세요."
+                                st.warning(err_msg)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                            else:
+                                err_json = resp.text
+                                err_msg = f"❌ API 응답 오류 (상태코드 {resp.status_code}): {err_json}"
+                                st.error(err_msg)
+                                st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                                
+                        except requests.exceptions.Timeout:
+                            status_placeholder.empty()
+                            err_msg = "⚠️ 구글 서버 응답 시간(10초)이 초과되었습니다. 다시 한 번 질문하기를 눌러주세요."
+                            st.warning(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})
+                        except Exception as e:
+                            status_placeholder.empty()
+                            err_msg = f"❌ AI 호출 중 오류 발생: {e}"
+                            st.error(err_msg)
+                            st.session_state["chat_messages"].append({"role": "assistant", "content": err_msg})

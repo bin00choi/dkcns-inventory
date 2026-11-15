@@ -279,8 +279,14 @@ if check_password():
         # -------------------------------------------------------------------------
         # 🖥️ 메인 UI 화면 구성
         # -------------------------------------------------------------------------
-        # (타이틀 옆에 작게 'by CHOI' 저작 표시가 붙도록 HTML 마크다운 처리)
-        st.markdown("<h1 style='display: inline;'>🔍 재고 조회</h1> <span style='font-size: 15px; color: #888888; margin-left: 10px; font-weight: normal; vertical-align: middle;'>by CHOI</span>", unsafe_allow_html=True)
+        # (display: flex와 align-items: baseline 옵션을 통하여 제목과 저작 표시를 한 줄에 무조건 가로 정렬합니다.)
+        st.markdown("""
+            <div style="display: flex; align-items: baseline; margin-bottom: 5px;">
+                <h1 style="margin: 0; display: inline-block;">🔍 재고 조회</h1>
+                <span style="font-size: 15px; color: #888888; margin-left: 12px; font-weight: normal;">by CHOI</span>
+            </div>
+        """, unsafe_allow_html=True)
+        
         st.caption(f"마지막 업데이트: {update_datetime}")
         st.markdown("---")
         

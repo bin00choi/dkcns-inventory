@@ -163,7 +163,15 @@ if check_password():
         sheet_summary = spreadsheet.worksheet("재고검증요약")
         df_sum = safe_get_dataframe(sheet_summary)
         
-        # 3. 업데이트 탭 연동하여 업로드 실시간 취득 (A1:B1에서 B1 값 획득)
+        # 3. 예약 시트 데이터 로드 (★신규 연동)
+        df_reserve = pd.DataFrame()
+        try:
+            sheet_reserve = spreadsheet.worksheet("예약")
+            df_reserve = safe_get_dataframe(sheet_reserve)
+        except Exception:
+            print("⚠️ '예약' 시트를 구글 스프레드시트에서 찾을 수 없습니다.")
+        
+        # 4. 업데이트 탭 연동하여 업로드 실시간 취득 (A1:B1에서 B1 값 획득)
         update_datetime_val = "알 수 없음"
         try:
             sheet_update = spreadsheet.worksheet("업데이트")
@@ -176,13 +184,14 @@ if check_password():
             except Exception:
                 pass
         
-        return df_inv, df_sum, update_datetime_val
+        return df_inv, df_sum, df_reserve, update_datetime_val
 
     # -------------------------------------------------------------------------
     # 🛠️ 데이터 로드 및 초기 정제
     # -------------------------------------------------------------------------
     df_inventory = pd.DataFrame()
     df_summary = pd.DataFrame()
+    df_reserve_raw = pd.DataFrame()
     update_datetime_raw = ""
     data_loaded = False
     
@@ -191,7 +200,7 @@ if check_password():
     status_holder.info("🔑 인증이 완료되었습니다. 데이터를 불러오는 중입니다...")
     
     try:
-        df_inventory, df_summary, update_datetime_raw = load_cloud_sheet_data()
+        df_inventory, df_summary, df_reserve_raw, update_datetime_raw = load_cloud_sheet_data()
         data_loaded = True
         status_holder.empty()
     except Exception as general_err:
@@ -277,9 +286,39 @@ if check_password():
         df_inventory = df_inventory.rename(columns=rename_dict)
 
         # -------------------------------------------------------------------------
+        # 🛡️ 예약재고 및 가용재고 실시간 연산 적용 (★신규 추가)
+        # -------------------------------------------------------------------------
+        df_inventory["예약재고"] = 0  # 초기값 생성
+        
+        if df_reserve_raw is not None and not df_reserve_raw.empty:
+            # 예약 시트의 컬럼명 동적 매핑
+            col_reserve_item = None
+            col_reserve_qty = None
+            for col in df_reserve_raw.columns:
+                if "품목" in col or "품명" in col:
+                    col_reserve_item = col
+                if "수량" in col or "재고" in col:
+                    col_reserve_qty = col
+            
+            if col_reserve_item and col_reserve_qty:
+                # 예약 데이터 내 수치화 적용 및 품목별 중복 합산 요약
+                df_reserve_raw[col_reserve_qty] = pd.to_numeric(df_reserve_raw[col_reserve_qty], errors='coerce').fillna(0).astype(int)
+                reserve_summary = df_reserve_raw.groupby(col_reserve_item)[col_reserve_qty].sum().to_dict()
+                
+                # 예약재고 반영 및 가용재고 감산 연산
+                for idx, row in df_inventory.iterrows():
+                    erp_item_name = str(row.get("ERP_품명", "")).strip()
+                    if erp_item_name in reserve_summary:
+                        res_qty = int(reserve_summary[erp_item_name])
+                        df_inventory.at[idx, "예약재고"] = res_qty
+                        
+                        # 가용재고 수치화 후 차감 (0 이하가 될 경우 0 처리)
+                        curr_avail = int(pd.to_numeric(row.get("대원_가용재고", 0), errors="coerce"))
+                        df_inventory.at[idx, "대원_가용재고"] = max(0, curr_avail - res_qty)
+
+        # -------------------------------------------------------------------------
         # 🖥️ 메인 UI 화면 구성
         # -------------------------------------------------------------------------
-        # (display: flex와 align-items: baseline 옵션을 통하여 제목과 저작 표시를 한 줄에 무조건 가로 정렬합니다.)
         st.markdown("""
             <div style="display: flex; align-items: baseline; margin-bottom: 5px;">
                 <h1 style="margin: 0; display: inline-block;">🔍 재고 조회</h1>
@@ -339,10 +378,11 @@ if check_password():
                     search_mask = search_mask | df_filtered[col].astype(str).str.contains(search_query.strip(), case=False, na=False)
                 df_filtered = df_filtered[search_mask]
 
-            # 4. '순번' 컬럼을 생성하고, 오직 지정된 15개의 컬럼만 최종 화면에 표시 (이외 품목 비표시)
+            # 4. '순번' 컬럼을 생성하고, 오직 지정된 16개의 컬럼만 최종 화면에 표시 (이외 품목 비표시)
+            # 대원_가용재고 옆에 '예약재고'가 오도록 컬럼 세트 배치 완료
             fixed_columns = [
                 "대분류", "중분류", "소분류", 
-                "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", 
+                "대원_업체상품코드", "대원_상품명", "대원_현재재고", "대원_가용재고", "예약재고", 
                 "ERP_품명", "적요(규격)", "거래처명", "ERP_재고수량", 
                 "입고단가", "입고일", "보유개월수"
             ]

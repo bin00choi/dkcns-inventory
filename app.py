@@ -6,6 +6,8 @@ from datetime import datetime
 import pytz
 import requests
 import json
+import re
+import io  # 엑셀 바이너리 버퍼용
 
 # Page 기본 설정
 st.set_page_config(page_title="재고 조회", layout="wide")
@@ -40,7 +42,6 @@ st.markdown("""
 
 /* 3. 모바일(640px 이하) 전용 반응형 레이아웃 및 폰트 축소 */
 @media (max-width: 640px) {
-    /* 모바일 전체 화면 여백 최적화 (상단 여백은 1.8rem으로 늘려 로그인창 잘림 방지) */
     .block-container {
         padding-top: 1.8rem !important;
         padding-bottom: 1.2rem !important;
@@ -48,7 +49,6 @@ st.markdown("""
         padding-right: 0.6rem !important;
     }
     
-    /* 모바일 타이틀 크기 가독성 확보 */
     .mobile-title h1 {
         font-size: 2.0rem !important;
     }
@@ -57,7 +57,6 @@ st.markdown("""
         margin-left: 8px !important;
     }
     
-    /* 대/중/소분류 다중 필터 한 줄 배치 고도화 */
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -67,13 +66,11 @@ st.markdown("""
         min-width: 0 !important;
         flex: 1 1 0% !important;
     }
-    /* 모바일 셀렉트박스 텍스트 가독성 확보 */
     div[data-baseweb="select"] {
         font-size: 11px !important;
         padding: 1px !important;
     }
     
-    /* 패스워드 입력창 모바일 전용 상하 정렬 여백 부여 */
     .stTextInput {
         margin-top: 15px !important;
         margin-bottom: 15px !important;
@@ -101,7 +98,6 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
             
-    # 로그인 타이틀과 비밀번호 폼 간의 공간 확보를 위한 컨테이너 구성
     st.markdown("<div style='margin-top: 20px;'>### 🔑 패스워드 입력</div>", unsafe_allow_html=True)
     st.text_input(
         "비밀번호를 입력하세요",
@@ -121,7 +117,7 @@ def check_password():
 # 비밀번호 통과 시에만 메인 프로그램 실행
 if check_password():
     # -------------------------------------------------------------------------
-    # ☁️ 구글 스프레드시트 및 Gemini API 연동 설정
+    # ☁️ 구글 스프레드시트 연동 설정
     # -------------------------------------------------------------------------
     @st.cache_data(ttl=60)
     def load_cloud_sheet_data():
@@ -142,14 +138,12 @@ if check_password():
         
         spreadsheet = client.open("dkcns_inventory")
         
-        # 구글시트 실제 최종 변경일시 획득
         sheet_updated_raw = "알 수 없음"
         try:
             sheet_updated_raw = spreadsheet.updated
         except Exception:
             pass
             
-        # 안전한 데이터프레임 변환 함수
         def safe_get_dataframe(worksheet):
             all_values = worksheet.get_all_values()
             if not all_values:
@@ -166,12 +160,9 @@ if check_password():
                 headers = headers[:df.shape[1]]
                 
             df.columns = headers
-            
-            # 공백 헤더명('') 및 Unnamed 컬럼 제거
             df = df.loc[:, df.columns.astype(str).str.strip() != '']
             df = df.loc[:, ~df.columns.astype(str).str.contains('^Unnamed:')]
             
-            # 숫자 자동 형변환
             for col in df.columns:
                 try:
                     df[col] = pd.to_numeric(df[col], errors='raise')
@@ -196,7 +187,7 @@ if check_password():
         except Exception:
             pass
         
-        # 4. 업데이트 탭 연동하여 업로드 일시 취득
+        # 4. 업데이트 탭 연동
         update_datetime_val = "알 수 없음"
         try:
             sheet_update = spreadsheet.worksheet("업데이트")
@@ -420,17 +411,47 @@ if check_password():
             def format_date(val):
                 if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
                     return ""
+                val_str = str(val).strip()
+                clean_digits = re.sub(r"[^0-9]", "", val_str)
+                if len(clean_digits) == 8:
+                    return f"{clean_digits[0:4]}-{clean_digits[4:6]}-{clean_digits[6:8]}"
+                elif len(clean_digits) == 6:
+                    return f"20{clean_digits[0:2]}-{clean_digits[2:4]}-{clean_digits[4:6]}"
                 try:
-                    dt_parsed = pd.to_datetime(val)
+                    dt_parsed = pd.to_datetime(val_str)
                     return dt_parsed.strftime('%Y-%m-%d')
                 except Exception:
-                    return str(val).split(" ")[0].strip()
+                    return val_str.split(" ")[0].strip()
 
             df_ordered["입고단가"] = df_ordered["입고단가"].apply(format_price)
             df_ordered["입고일"] = df_ordered["입고일"].apply(format_date)
             
             df_ordered = df_ordered.reset_index(drop=True)
             df_ordered.insert(0, "순번", range(1, len(df_ordered) + 1))
+            
+            # -----------------------------------------------------------------
+            # 📥 [신규 기능] 엑셀(.xlsx) 파일 생성 함수 및 다운로드 버튼
+            # -----------------------------------------------------------------
+            def convert_df_to_excel(df_to_export):
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_to_export.to_excel(writer, index=False, sheet_name='실시간재고목록')
+                return output.getvalue()
+
+            # 표 상단 컨트롤 바 (조회 건수 + 엑셀 다운로드 버튼)
+            top_bar_col1, top_bar_col2 = st.columns([3, 1])
+            with top_bar_col1:
+                st.caption(f"📊 총 **{len(df_ordered):,}**건의 품목이 조회되었습니다.")
+            with top_bar_col2:
+                excel_bytes = convert_df_to_excel(df_ordered)
+                file_timestamp = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y%m%d_%H%M%S')
+                st.download_button(
+                    label="📥 엑셀 다운로드 (.xlsx)",
+                    data=excel_bytes,
+                    file_name=f"재고조회_{file_timestamp}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
             
             st.caption("💡 **모바일 팁**: 표를 **좌우로 밀어서(가로 스크롤)** 숨겨진 전체 상세 열 정보를 편리하게 확인하실 수 있습니다.")
             st.dataframe(df_ordered, use_container_width=True, hide_index=True)

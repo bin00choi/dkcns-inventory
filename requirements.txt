@@ -4,3 +4,4 @@ gspread
 google-auth
 google-generativeai>=0.8.0
 pytz
+openpyxl
